@@ -1,0 +1,86 @@
+# =========================================================
+# maisha/.gitignore — root level, covers backend + ai-engine
+# frontend/ has its own repo and is intentionally excluded
+# =========================================================
+
+# ---------------------------------------------------------
+# Laravel (backend/maisha-api)
+# ---------------------------------------------------------
+backend/maisha-api/vendor/
+backend/maisha-api/node_modules/
+backend/maisha-api/.env
+backend/maisha-api/.env.*
+!backend/maisha-api/.env.example
+
+backend/maisha-api/storage/*.key
+backend/maisha-api/storage/logs/*
+!backend/maisha-api/storage/logs/.gitkeep
+backend/maisha-api/storage/framework/cache/*
+backend/maisha-api/storage/framework/sessions/*
+backend/maisha-api/storage/framework/views/*
+!backend/maisha-api/storage/framework/cache/.gitkeep
+!backend/maisha-api/storage/framework/sessions/.gitkeep
+!backend/maisha-api/storage/framework/views/.gitkeep
+backend/maisha-api/storage/app/backups/
+
+backend/maisha-api/bootstrap/cache/*
+!backend/maisha-api/bootstrap/cache/.gitkeep
+
+backend/maisha-api/.phpunit.result.cache
+backend/maisha-api/public/hot
+backend/maisha-api/public/storage
+
+backend/maisha-api/*.json
+backend/maisha-api/*.log
+backend/maisha-api/*.txt
+!backend/maisha-api/composer.json
+!backend/maisha-api/package.json
+!backend/maisha-api/package-lock.json
+
+# ---------------------------------------------------------
+# ai-engine (Python / Flask)
+# ---------------------------------------------------------
+ai-engine/venv/
+ai-engine/.venv/
+ai-engine/__pycache__/
+ai-engine/**/__pycache__/
+ai-engine/*.pyc
+ai-engine/*.pyo
+ai-engine/.env
+ai-engine/.env.*
+!ai-engine/.env.example
+
+ai-engine/**/*.pt
+ai-engine/**/*.onnx
+ai-engine/**/*.h5
+ai-engine/**/checkpoints/
+
+# ---------------------------------------------------------
+# Frontend — has its own repo, do not track here at all
+# ---------------------------------------------------------
+frontend/
+
+# ---------------------------------------------------------
+# OS / editor cruft
+# ---------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ---------------------------------------------------------
+# Root-level env files (docker-compose reads these locally)
+# ---------------------------------------------------------
+.env
+.env.local
+
+# ---------------------------------------------------------
+# testing/ — ignore generated logs and backup scripts
+# ---------------------------------------------------------
+testing/*.log
+testing/*.txt
+testing/*.bak
+testing/*.bak2
+testing/*_backup.sh
+backend/maisha-api/commands.php

@@ -1,0 +1,870 @@
+
+{
+  "info": {
+    "name": "Maisha Nutrition System — Full Test Suite",
+    "description": "Complete API test collection for the Maisha nutrition assistant. Covers 10 user profiles (6 original + 4 new), all edge cases, medication safety tiers, condition flags, WhatsApp intent classification, pantry management, and hydration engine.\n\nBase URL: Set {{base_url}} = your Flask API root (e.g. http://localhost:5000)\n\nRun order: Onboarding → Morning Plan → Edge Cases → Pantry → WhatsApp Webhook",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:5000", "type": "string" },
+    { "key": "laravel_url", "value": "http://localhost:8000", "type": "string" }
+  ],
+  "item": [
+
+    {
+      "name": "── USER 1 — Amina (Weight Loss, Sedentary, No Conditions) ──",
+      "item": [
+        {
+          "name": "01 Onboarding — Amina",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"name\": \"Amina\",\n  \"age\": 34,\n  \"gender\": \"female\",\n  \"weight_kg\": 72,\n  \"height_cm\": 163,\n  \"activity_level\": \"sedentary\",\n  \"primary_goal\": \"weight_loss\",\n  \"target_weight_kg\": 60,\n  \"timeline_weeks\": 24,\n  \"budget_daily_kes\": 150,\n  \"conditions\": [],\n  \"allergies\": [],\n  \"medications\": [],\n  \"meal_slots\": [\"breakfast\", \"lunch\"],\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 },\n    { \"ingredient\": \"sugar\", \"tier\": 1 },\n    { \"ingredient\": \"tea_leaves\", \"tier\": 1 }\n  ],\n  \"location\": \"Nairobi CBD\"\n}"
+            }
+          },
+          "_postman_previewlanguage": "json",
+          "description": "EXPECT: BMR ~1420, TDEE ~1704, daily_kcal ~1204. System confirms 2-meal plan is valid for weight loss. No flags raised."
+        },
+        {
+          "name": "02 Morning Plan — Amina (normal day)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"06:45\"\n}"
+            }
+          },
+          "description": "EXPECT: Breakfast slot ~300 kcal / ~45-50 KES with category options (carb, protein, drink). Lunch slot ~700 kcal / ~100 KES. Water target 1.8L distributed across day. Eggs marked as pantry (zero cost). No dinner slot."
+        },
+        {
+          "name": "03 Edge Case — Meal Skip + Time Constraint",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"message\": \"niko busy sana leo sina time ya breakfast\",\n  \"timestamp\": \"2025-01-20T11:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_skip+time_constraint. Lunch kcal target bumps from 700 to 900. Protein emphasis (eggs/beans). Hydration nudge (3 glasses now). No medication concern since Amina has none."
+        },
+        {
+          "name": "04 Edge Case — Variety Request (tired of ugali)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"message\": \"nimechoka na ugali kila siku\",\n  \"timestamp\": \"2025-01-22T09:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_feedback+variety_request. Ugali removed from rotation for 7 days. System returns 3 alternative carb combos (rice+beans, chapati+lentils, sweet potato+omena). Ugali scheduled to return next week."
+        },
+        {
+          "name": "05 Edge Case — Progress Update (lost 1kg)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"message\": \"nimepoteza kilo moja!\",\n  \"timestamp\": \"2025-01-24T08:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=progress_update. Milestone acknowledged. Projected goal timeline recalculated (~5 months at current rate). Next week's plan notes 50 kcal reduction as adaptation. Encouragement message."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 2 — James (Type 2 Diabetes, Metformin, Kisumu) ──",
+      "item": [
+        {
+          "name": "06 Onboarding — James (flags 2-large-meal pattern)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"name\": \"James\",\n  \"age\": 52,\n  \"gender\": \"male\",\n  \"weight_kg\": 84,\n  \"height_cm\": 172,\n  \"activity_level\": \"light\",\n  \"primary_goal\": \"diabetic_control\",\n  \"budget_daily_kes\": 200,\n  \"conditions\": [\"type2_diabetes\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Metformin\",\n      \"dose\": \"500mg\",\n      \"times\": [\"08:00\", \"20:00\"],\n      \"requires_food\": true\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"lunch\"],\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"rice\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 },\n    { \"ingredient\": \"onions\", \"tier\": 1 },\n    { \"ingredient\": \"tomatoes\", \"tier\": 2, \"quantity\": 5 }\n  ],\n  \"location\": \"Kisumu\"\n}"
+            }
+          },
+          "description": "EXPECT: System flags 2-large-meal pattern. Recommends 5-meal split. Medication anchors set at 07:30 and 19:30. Ugali EXCLUDED (diabetes flag). Sugar EXCLUDED. White rice flagged (reduced portions). Carb ceiling 120g/day. 40g max per meal."
+        },
+        {
+          "name": "07 Morning Plan — James (5-meal diabetic plan)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"06:50\"\n}"
+            }
+          },
+          "description": "EXPECT: 5 slots: 07:30 (320 kcal ⚓), 10:30 snack (160 kcal), 13:00 lunch (480 kcal), 16:00 snack (160 kcal), 19:30 dinner (480 kcal ⚓). Metformin reminders at anchor slots. No ugali. No sugar. Water 2.2L."
+        },
+        {
+          "name": "08 TIER 1 SAFETY — Breakfast Not Eaten at 8:15am",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"message\": \"sijala breakfast bado\",\n  \"timestamp\": \"2025-01-20T08:15:00\"\n}"
+            }
+          },
+          "description": "EXPECT: PRIORITY TIER 1 response. Metformin safety warning. Urgent instruction to eat something small NOW (biscuits/half banana). This must fire even if the user is inactive / hasn't engaged in days. Do NOT soften the urgency."
+        },
+        {
+          "name": "09 Edge Case — Doctor Changes Carb Target",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"message\": \"doctor amesema nipunguze wanga zaidi\",\n  \"timestamp\": \"2025-01-22T10:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=goal_change+medical_instruction. Carb target updates from 120g to 80g. Sweet potato and brown rice removed. New carb sources listed (sorghum uji, millet, vegetables, legumes). System notes doctor instructions take priority."
+        },
+        {
+          "name": "10 Edge Case — James Eats Ugali Anyway",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"message\": \"nilikula ugali kwa lunch leo\",\n  \"timestamp\": \"2025-01-21T14:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_log+condition_conflict. Gentle but clear flag that ugali is high-GI and will spike blood sugar. Suggest balance for dinner (low-carb, high protein). Remind of daily carb ceiling. No judgment — practical correction."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 3 — Brenda (H. Pylori, University Student, 80 KES) ──",
+      "item": [
+        {
+          "name": "11 Onboarding — Brenda (flags breakfast skip with medication)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR003\",\n  \"name\": \"Brenda\",\n  \"age\": 22,\n  \"gender\": \"female\",\n  \"weight_kg\": 56,\n  \"height_cm\": 161,\n  \"activity_level\": \"moderate\",\n  \"primary_goal\": \"nutrient_intake\",\n  \"budget_daily_kes\": 80,\n  \"conditions\": [\"h_pylori\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Amoxicillin\",\n      \"times\": [\"07:00\", \"14:00\", \"21:00\"],\n      \"requires_food\": true\n    },\n    {\n      \"name\": \"Clarithromycin\",\n      \"times\": [\"07:00\", \"14:00\", \"21:00\"],\n      \"requires_food\": true\n    }\n  ],\n  \"meal_slots\": [\"lunch\", \"dinner\"],\n  \"pantry\": [],\n  \"location\": \"Nairobi (University Campus)\"\n}"
+            }
+          },
+          "description": "EXPECT: Flag that 7am Amoxicillin requires food but breakfast is skipped. System presents 2 options (quick breakfast or schedule-based slot). Avoid: pilipili, coffee, acidic fruits. Budget split: breakfast 15 / lunch 35 / dinner 30 KES. Bulk pantry strategy suggested."
+        },
+        {
+          "name": "12 Morning Plan — Brenda (ultra-budget 3-meal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR003\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"06:45\"\n}"
+            }
+          },
+          "description": "EXPECT: 3 medication-anchored slots. 07:00 quick breakfast (banana/biscuits, ~15 KES). 12:30 lunch (~35 KES, mama mboga options). 18:30 dinner (~30 KES, hostel options). Water 30 mins BEFORE meals not during. Coffee/soda/pilipili blocked."
+        },
+        {
+          "name": "13 Edge Case — Ate Chips for Lunch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR003\",\n  \"message\": \"nimekula chips tu kwa lunch nikiwa busy\",\n  \"timestamp\": \"2025-01-20T14:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_log+poor_nutrition. No shame. Practical correction: balance dinner with uji+eggs. H. Pylori note — uji is stomach-friendly. Remind to take 2pm Clarithromycin with something small if not yet taken."
+        },
+        {
+          "name": "14 Edge Case — Treatment Complete",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR003\",\n  \"message\": \"nimemaliza dawa yangu yote leo\",\n  \"timestamp\": \"2025-01-30T09:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=medication_complete. H. Pylori anchors removed. Coffee/acidic foods cleared (slowly — 1 week). 3-meal pattern retained. Remind to retest in 4-6 weeks per doctor. Goal reverts to budget nutrition management."
+        },
+        {
+          "name": "15 Edge Case — Budget Hit Zero Mid-Week",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR003\",\n  \"message\": \"nimekwisha pesa leo kabisa\",\n  \"timestamp\": \"2025-01-23T12:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=budget_zero. System falls back to pantry-only suggestions. If pantry is also empty, acknowledges situation with dignity (no judgment). Suggests cheapest possible options (uji from bulk flour, plain ugali). Still reminds about medication timing."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 4 — Brian (Muscle Gain, Lactose Intolerant, Westlands) ──",
+      "item": [
+        {
+          "name": "16 Onboarding — Brian (protein/budget conflict detection)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR004\",\n  \"name\": \"Brian\",\n  \"age\": 28,\n  \"gender\": \"male\",\n  \"weight_kg\": 78,\n  \"height_cm\": 180,\n  \"activity_level\": \"very_active\",\n  \"primary_goal\": \"muscle_gain\",\n  \"budget_daily_kes\": 400,\n  \"conditions\": [],\n  \"allergies\": [\"lactose\"],\n  \"medications\": [],\n  \"meal_slots\": [\"pre_workout\", \"breakfast\", \"lunch\", \"post_workout\", \"dinner\"],\n  \"workout_time\": \"06:00\",\n  \"pantry\": [\n    { \"ingredient\": \"oats\", \"tier\": 2, \"quantity\": \"500g\" },\n    { \"ingredient\": \"peanut_butter\", \"tier\": 2, \"quantity\": \"350g\" },\n    { \"ingredient\": \"protein_powder\", \"tier\": 2, \"quantity\": \"1kg\" },\n    { \"ingredient\": \"eggs\", \"tier\": 2, \"quantity\": 60 },\n    { \"ingredient\": \"rice\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 }\n  ],\n  \"location\": \"Westlands, Nairobi\"\n}"
+            }
+          },
+          "description": "EXPECT: BMR ~1820, TDEE ~3458, target 3758 kcal. Protein target 188g/day. System detects protein/budget conflict and proposes hybrid strategy (cheap proteins cover 120g, powder fills 70g). Lactose flag: no dairy milk/yoghurt — plant milk substituted. No dairy in any suggestion."
+        },
+        {
+          "name": "17 Pre-Workout Plan — Brian (5:40am)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR004\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"05:40\"\n}"
+            }
+          },
+          "description": "EXPECT: 5 meal slots. Pre-workout 300 kcal (oats+banana+coffee, pantry). Post-workout flagged PRIORITY with 30-min window. Total kcal ~3750. Protein est ~185g. Water 3.2L. No dairy in any slot. Plant milk noted."
+        },
+        {
+          "name": "18 Edge Case — Rest Day (missed gym)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR004\",\n  \"message\": \"haikuwezekanika kwenda gym leo\",\n  \"timestamp\": \"2025-01-21T07:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=activity_change. Rest day protocol. Calorie drops to ~2800. Pre-workout skipped. Post-workout replaced with light snack. All meals -20% portion. Muscle growth reminder (rest = growth)."
+        },
+        {
+          "name": "19 Edge Case — Protein Powder Depleted",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR004\",\n  \"message\": \"protein powder yameisha\",\n  \"timestamp\": \"2025-01-22T08:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=pantry_update+nutrition_gap. Powder marked depleted. 70g protein gap calculated. Budget reallocation: +2 eggs (+12g, +32 KES), omena to lunch (+20g, +30 KES), lentils to dinner (+18g, +25 KES). Gap partially covered. Restock advised."
+        },
+        {
+          "name": "20 Edge Case — Dairy Accidentally Consumed",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR004\",\n  \"message\": \"nilikuwa na chai ya maziwa asubuhi bila kukumbuka\",\n  \"timestamp\": \"2025-01-20T09:30:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=allergy_exposure. Practical response — note what happened, suggest monitoring for symptoms (bloating, cramps). No panic. Rest of day plan avoids all dairy. Future suggestions reinforce dairy-free alternatives. No alarm if accidental small exposure."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 5 — Mary (Anaemia, Single Mother, Family Budget, Kibera) ──",
+      "item": [
+        {
+          "name": "21 Onboarding — Mary (family nutrition + iron medication timing)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR005\",\n  \"name\": \"Mary\",\n  \"age\": 45,\n  \"gender\": \"female\",\n  \"weight_kg\": 63,\n  \"height_cm\": 158,\n  \"activity_level\": \"moderate\",\n  \"primary_goal\": \"nutrient_intake\",\n  \"budget_daily_kes\": 200,\n  \"cooking_for\": 4,\n  \"children_ages\": [8, 11, 14],\n  \"conditions\": [\"anaemia\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Ferrous Sulfate\",\n      \"times\": [\"06:00\"],\n      \"requires_empty_stomach\": true,\n      \"food_after_minutes\": 30\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"lunch\", \"dinner\"],\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"rice\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 },\n    { \"ingredient\": \"salt\", \"tier\": 1 },\n    { \"ingredient\": \"onions\", \"tier\": 1 }\n  ],\n  \"location\": \"Kibera, Nairobi\"\n}"
+            }
+          },
+          "description": "EXPECT: Iron target 18mg/day. Tea-with-breakfast flag (reduces absorption — tea 1 hour after). Vitamin C pairing noted (+absorption). Family budget split: 200 KES / 4 people. Children protein priority. Mary personal iron priority. Cooking for 4 affects portion calculations."
+        },
+        {
+          "name": "22 Morning Plan — Mary (family day, iron anchored)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR005\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"06:00\"\n}"
+            }
+          },
+          "description": "EXPECT: Ferrous sulfate reminder at 06:00 (empty stomach). Breakfast at 06:30 (30 min later). Sorghum uji (iron-rich), eggs (protein for children), tomatoes (Vitamin C + iron absorption). Tea delayed to 07:30. Lunch for Mary alone (children at school). Dinner for family. Total ~170 KES."
+        },
+        {
+          "name": "23 Edge Case — Children Refuse Beans",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR005\",\n  \"message\": \"watoto wamekataa beans tena\",\n  \"timestamp\": \"2025-01-20T19:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=family_feedback+meal_rejection. Three practical alternatives (coconut milk beans, mashed beans in ugali, githeri). Githeri suggestion with cost (~50 KES family). Iron and protein value preserved across alternatives."
+        },
+        {
+          "name": "24 Edge Case — Mary Exhausted After Hard Day",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR005\",\n  \"message\": \"nimechoka sana leo kazi ilikuwa ngumu\",\n  \"timestamp\": \"2025-01-20T18:30:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=fatigue+emotional_state. Empathetic response. Suggest 15-min quick dinner (reheat yesterday's beans + ugali + raw tomato). No elaborate cooking required. Hydration note (fatigue often = dehydration). Compassion without being dismissive of her situation."
+        },
+        {
+          "name": "25 Edge Case — Mary Skips Her Iron Tablet",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR005\",\n  \"message\": \"nilisahau dawa ya chuma asubuhi\",\n  \"timestamp\": \"2025-01-20T10:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=medication_skip. Iron tablet guidance: if stomach is not empty now, take with Vitamin C food (tomato/orange) to partially offset. Don't double dose. Reminder set for tomorrow 06:00. Note that consistent dosing is critical for anaemia treatment."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 6 — Kevin (H. Pylori + Ulcer, Erratic Schedule, Mombasa) ──",
+      "item": [
+        {
+          "name": "26 Onboarding — Kevin (multiple red flags, night owl schedule)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"name\": \"Kevin\",\n  \"age\": 19,\n  \"gender\": \"male\",\n  \"weight_kg\": 52,\n  \"height_cm\": 178,\n  \"activity_level\": \"light\",\n  \"primary_goal\": \"weight_gain\",\n  \"budget_daily_kes\": 120,\n  \"conditions\": [\"h_pylori\", \"ulcer\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Omeprazole\",\n      \"times\": [\"11:00\"],\n      \"requires_empty_stomach\": true,\n      \"food_after_minutes\": 30\n    },\n    {\n      \"name\": \"Amoxicillin\",\n      \"times\": [\"11:30\", \"15:00\", \"22:00\"],\n      \"requires_food\": true\n    },\n    {\n      \"name\": \"Clarithromycin\",\n      \"times\": [\"11:30\", \"15:00\", \"22:00\"],\n      \"requires_food\": true\n    }\n  ],\n  \"meal_slots\": [],\n  \"sleep_schedule\": { \"sleep\": \"03:00\", \"wake\": \"11:00\" },\n  \"eating_pattern\": \"erratic\",\n  \"pantry\": [],\n  \"location\": \"Mombasa\"\n}"
+            }
+          },
+          "description": "EXPECT: 3 red flags raised. Schedule built around 11am wake time (not standard morning). Medication anchors: Omeprazole 11:00 (empty stomach), then 11:30/15:00/22:00 with food. Calorie target 2200 (underweight surplus). Ulcer limits per-meal portion size. Street food flagged (re-used oil). Empty stomach danger noted."
+        },
+        {
+          "name": "27 'Morning' Plan — Kevin (11:05am wake)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"11:05\"\n}"
+            }
+          },
+          "description": "EXPECT: Omeprazole reminder first. 3 medication-anchored meal slots (11:30, 15:00, 22:00). Dinner kept light (ulcer + lying down). No coffee/pilipili/soda. Milk or uji recommended (coats stomach). Water 30 min before meals. ~100 KES total."
+        },
+        {
+          "name": "28 TIER 1 SAFETY — Forgot Midday Medication + Food",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"message\": \"nimesahau kula na dawa zangu za saa tisa\",\n  \"timestamp\": \"2025-01-20T15:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: PRIORITY TIER 1. Triple therapy without food + ulcer = high risk. Urgent instruction: eat something NOW (3-4 biscuits, bread, banana). Take medication immediately after. Confirm back when done. Do not soften or delay this response."
+        },
+        {
+          "name": "29 Edge Case — Hungry at 2am",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"message\": \"naona njaa sana\",\n  \"timestamp\": \"2025-01-20T02:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=hunger+unusual_time+ulcer_condition. Acknowledge 2am hunger. Empty stomach is dangerous for ulcer. Recommend: bread+milk (coats stomach), plain uji, or banana. Block spicy/fried/acidic. Note this is comfort eating not medication time."
+        },
+        {
+          "name": "30 Edge Case — Side Effects from Triple Therapy",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"message\": \"sijisikii vizuri dawa zinanisumbua\",\n  \"timestamp\": \"2025-01-22T13:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=side_effect+treatment_concern. Normalize triple therapy side effects (nausea, metallic taste, loose stomach). Practical help: always eat before dawa, probiotics/yoghurt, ginger tea. Severe symptoms (vomiting, rash, severe pain) = hospital. Complete the course — partial course creates resistance."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 7 — Grace (Hypertension, Low-Sodium, Eldoret) ──",
+      "item": [
+        {
+          "name": "31 Onboarding — Grace (hypertension, sodium restriction)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR007\",\n  \"name\": \"Grace\",\n  \"age\": 48,\n  \"gender\": \"female\",\n  \"weight_kg\": 78,\n  \"height_cm\": 162,\n  \"activity_level\": \"light\",\n  \"primary_goal\": \"weight_loss\",\n  \"budget_daily_kes\": 180,\n  \"conditions\": [\"hypertension\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Amlodipine\",\n      \"dose\": \"5mg\",\n      \"times\": [\"08:00\"],\n      \"requires_food\": false,\n      \"note\": \"can take with or without food, but consistency matters\"\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"lunch\", \"dinner\"],\n  \"sodium_limit_mg\": 1500,\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 },\n    { \"ingredient\": \"salt\", \"tier\": 1 }\n  ],\n  \"location\": \"Eldoret\"\n}"
+            }
+          },
+          "description": "EXPECT: Sodium limit 1500mg/day flagged across all meals. Salt in pantry marked as restricted (not zero, but flagged). Processed foods blocked (sausages, canned goods). Stock cube/royco flagged as high sodium. Potassium-rich foods prioritized (bananas, sweet potato, sukuma). DASH diet principles applied."
+        },
+        {
+          "name": "32 Morning Plan — Grace (low-sodium day)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR007\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"07:00\"\n}"
+            }
+          },
+          "description": "EXPECT: 3 meals within sodium budget. No processed meats. Royco/stock cubes absent. Potassium foods featured (bananas, sweet potato, sukuma, managu). Cooking instructions note: use herbs/lemon not salt for flavour. Amlodipine reminder at 8am (flexible with/without food)."
+        },
+        {
+          "name": "33 Edge Case — Used Royco in Cooking",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR007\",\n  \"message\": \"nilitumia royco kidogo kwa beans zangu\",\n  \"timestamp\": \"2025-01-20T13:30:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_log+sodium_flag. Gentle note that Royco is high sodium (~500mg per serving). Remaining sodium budget for the day reduced accordingly. Rest of day plan adjusted (very low sodium dinner). Not a crisis — practical recalibration."
+        },
+        {
+          "name": "34 Edge Case — Blood Pressure Reading Shared",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR007\",\n  \"message\": \"BP yangu leo ilikuwa 158/95\",\n  \"timestamp\": \"2025-01-20T09:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=health_metric_update. Acknowledge reading. 158/95 is elevated — note this, suggest logging to share with doctor. Reinforce today's low-sodium plan. Increase water intake recommendation. Suggest rest. IMPORTANT: system does NOT diagnose or prescribe — it flags and defers to doctor."
+        },
+        {
+          "name": "35 Edge Case — Craving Salty Snack",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR007\",\n  \"message\": \"nataka kitu cha chumvi sana sasa hivi\",\n  \"timestamp\": \"2025-01-21T15:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=craving+condition_conflict. Acknowledge the craving (real, not weakness). Offer low-sodium alternatives: roasted groundnuts (unsalted), cucumber with lemon, plain popcorn. Explain salt craving connection to water intake — suggest large glass of water first."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 8 — Samuel (Kidney Disease, Fluid & Potassium Restricted) ──",
+      "item": [
+        {
+          "name": "36 Onboarding — Samuel (kidney disease, multiple restrictions)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR008\",\n  \"name\": \"Samuel\",\n  \"age\": 58,\n  \"gender\": \"male\",\n  \"weight_kg\": 70,\n  \"height_cm\": 169,\n  \"activity_level\": \"sedentary\",\n  \"primary_goal\": \"nutrient_intake\",\n  \"budget_daily_kes\": 250,\n  \"conditions\": [\"chronic_kidney_disease\"],\n  \"ckd_stage\": 3,\n  \"fluid_limit_ml\": 1200,\n  \"potassium_limit_mg\": 2000,\n  \"phosphorus_limit_mg\": 800,\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Furosemide\",\n      \"dose\": \"40mg\",\n      \"times\": [\"08:00\"],\n      \"requires_food\": true\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"lunch\", \"dinner\"],\n  \"pantry\": [\n    { \"ingredient\": \"rice\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 }\n  ],\n  \"location\": \"Nakuru\"\n}"
+            }
+          },
+          "description": "EXPECT: MULTIPLE CRITICAL FLAGS. Fluid restricted to 1200ml (NOT the standard 35ml/kg formula). High-potassium foods BLOCKED (bananas, sweet potato, tomatoes, beans, managu). High-phosphorus blocked (dairy, nuts, legumes — major protein sources removed). System must flag that nutrition on CKD requires dietitian. Water target: 1200ml HARD CEILING. This is the hardest profile to serve."
+        },
+        {
+          "name": "37 Morning Plan — Samuel (kidney-safe day)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR008\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"07:30\"\n}"
+            }
+          },
+          "description": "EXPECT: Fluid tracked across ALL sources (food + water combined). Potassium-flagged foods absent. White rice (low potassium) featured. Egg whites over whole eggs (lower phosphorus). Furosemide anchor at 08:00 with food. System notes if full nutritional targets cannot be met safely — defers to dietitian."
+        },
+        {
+          "name": "38 Edge Case — Ate Banana (high potassium)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR008\",\n  \"message\": \"nilikula ndizi moja asubuhi\",\n  \"timestamp\": \"2025-01-20T08:30:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=meal_log+condition_conflict (HIGH SEVERITY). One banana = ~422mg potassium. For a 2000mg daily limit this is 21% of budget in one item. Rest of day must be very low potassium. System adjusts remaining suggestions accordingly. Note: if this is a pattern, doctor must be informed."
+        },
+        {
+          "name": "39 Edge Case — Drank Extra Water",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR008\",\n  \"message\": \"nimekuwa nikinywa maji mengi leo — glasi 6 tayari\",\n  \"timestamp\": \"2025-01-20T14:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: FLUID SAFETY ALERT. 6 glasses ≈ 1500ml — over the 1200ml limit. This is a medical concern for CKD. System flags clearly: fluid limit exceeded today. No more water for the rest of the day. Recommends contacting doctor if swelling or breathlessness occurs. Direct, not alarmist."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 9 — Rose (Pregnant, 2nd Trimester, Meru) ──",
+      "item": [
+        {
+          "name": "40 Onboarding — Rose (pregnancy nutrition, folic acid, iron)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR009\",\n  \"name\": \"Rose\",\n  \"age\": 27,\n  \"gender\": \"female\",\n  \"weight_kg\": 67,\n  \"height_cm\": 160,\n  \"activity_level\": \"light\",\n  \"primary_goal\": \"nutrient_intake\",\n  \"pregnancy_week\": 18,\n  \"budget_daily_kes\": 200,\n  \"conditions\": [\"pregnancy\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Folic Acid\",\n      \"times\": [\"08:00\"],\n      \"requires_food\": false\n    },\n    {\n      \"name\": \"Ferrous Sulfate\",\n      \"times\": [\"10:00\"],\n      \"requires_empty_stomach\": false,\n      \"note\": \"take between meals for absorption\"\n    },\n    {\n      \"name\": \"Calcium\",\n      \"times\": [\"20:00\"],\n      \"requires_food\": false\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"morning_snack\", \"lunch\", \"afternoon_snack\", \"dinner\"],\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 },\n    { \"ingredient\": \"rice\", \"tier\": 1 }\n  ],\n  \"location\": \"Meru\"\n}"
+            }
+          },
+          "description": "EXPECT: Pregnancy calorie adjustment (+350 kcal 2nd trimester). Iron 27mg/day target (pregnancy doubles requirement). Folic acid 600mcg target. Calcium 1000mg/day. Foods to avoid: raw meat/fish, unpasteurized dairy, papaya (excess), pineapple (excess), alcohol. Folate-rich foods featured (dark leafy, lentils). Calcium-iron separation noted (take at different times). Morning sickness-friendly options available."
+        },
+        {
+          "name": "41 Morning Plan — Rose (pregnancy 5-meal plan)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR009\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"07:00\"\n}"
+            }
+          },
+          "description": "EXPECT: 5 smaller meals (nausea management). Folic acid reminder. Iron supplement between meals (not with tea/calcium). Folate-rich foods at multiple slots. Calcium at dinner slot. Raw egg/meat absent. Sorghum uji (iron), dark greens, lentils featured."
+        },
+        {
+          "name": "42 Edge Case — Morning Sickness, Can't Eat",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR009\",\n  \"message\": \"naona kichefuchefu sana asubuhi siwezi kula chochote\",\n  \"timestamp\": \"2025-01-20T08:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=nausea+pregnancy. Empathy first. Morning sickness management: dry crackers/plain biscuits before getting up. Ginger tea (safe in pregnancy, anti-nausea). Cold foods over hot (smell triggers nausea). Small amounts frequently. Hydration critical (vomiting = dehydration risk). If unable to keep anything down for 24h — see doctor (hyperemesis risk)."
+        },
+        {
+          "name": "43 Edge Case — Craving Unusual Food (ugali + soil/clay)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR009\",\n  \"message\": \"ninataka kula udongo au kitu cha uchungu sana\",\n  \"timestamp\": \"2025-01-21T10:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=pica_craving. This is PICA — a pregnancy phenomenon often signalling iron or zinc deficiency. DO NOT normalize eating soil/clay (it's dangerous — parasites, toxins). Explain what pica means (iron deficiency signal). Check iron supplement compliance. Suggest immediate ANC visit. Offer iron-rich food alternatives as craving redirection."
+        },
+        {
+          "name": "44 Edge Case — Asks if Papaya is Safe",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR009\",\n  \"message\": \"ninaweza kula papai wakati wa ujauzito?\",\n  \"timestamp\": \"2025-01-22T11:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=food_safety_query+pregnancy. Nuanced answer: ripe papaya in small amounts is generally fine. Unripe/semi-ripe papaya contains latex which can cause contractions — AVOID. Papaya seeds also avoid. Suggest safer Vitamin C alternatives (orange, tomatoes). Always confirm with ANC provider."
+        }
+      ]
+    },
+
+    {
+      "name": "── USER 10 — Joseph (Elderly, 68, Multiple Conditions, Thika) ──",
+      "item": [
+        {
+          "name": "45 Onboarding — Joseph (elderly, diabetes + hypertension + arthritis)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/onboarding",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR010\",\n  \"name\": \"Joseph\",\n  \"age\": 68,\n  \"gender\": \"male\",\n  \"weight_kg\": 75,\n  \"height_cm\": 170,\n  \"activity_level\": \"sedentary\",\n  \"primary_goal\": \"diabetic_control\",\n  \"budget_daily_kes\": 300,\n  \"conditions\": [\"type2_diabetes\", \"hypertension\", \"arthritis\"],\n  \"allergies\": [],\n  \"medications\": [\n    {\n      \"name\": \"Metformin\",\n      \"dose\": \"1000mg\",\n      \"times\": [\"07:30\", \"19:30\"],\n      \"requires_food\": true\n    },\n    {\n      \"name\": \"Lisinopril\",\n      \"dose\": \"10mg\",\n      \"times\": [\"08:00\"],\n      \"requires_food\": false\n    },\n    {\n      \"name\": \"Diclofenac\",\n      \"dose\": \"50mg\",\n      \"times\": [\"12:00\", \"20:00\"],\n      \"requires_food\": true,\n      \"note\": \"NSAID — must take with food to protect stomach lining\"\n    }\n  ],\n  \"meal_slots\": [\"breakfast\", \"mid_morning\", \"lunch\", \"afternoon\", \"dinner\"],\n  \"dietary_texture\": \"soft_foods_preferred\",\n  \"pantry\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1 },\n    { \"ingredient\": \"rice\", \"tier\": 1 },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1 }\n  ],\n  \"location\": \"Thika\"\n}"
+            }
+          },
+          "description": "EXPECT: Complex multi-condition system. Diabetes: ugali excluded, sugar excluded, low-GI carbs, carb ceiling, 5-meal split. Hypertension: sodium restricted, potassium-rich foods. Arthritis: anti-inflammatory foods (turmeric, ginger, oily fish), soft textures preferred. Diclofenac: NSAID gastric risk — must ALWAYS have food. Metformin anchors. Lisinopril flexible. Conflicts: potassium-rich foods (good for BP) may conflict with CKD if any develops."
+        },
+        {
+          "name": "46 Morning Plan — Joseph (multi-condition 5-meal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/meal-plan/daily",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR010\",\n  \"date\": \"2025-01-20\",\n  \"time\": \"07:00\"\n}"
+            }
+          },
+          "description": "EXPECT: 5 slots. Metformin anchors 07:30+19:30. Diclofenac at 12:00 and 20:00 — meals timed accordingly. Soft food options (well-cooked ugali alternatives, soft beans, boiled vegetables). No ugali, no sugar, low sodium. Anti-inflammatory additions (ginger tea, turmeric in stew). Water target with hypertension note (not excess)."
+        },
+        {
+          "name": "47 Edge Case — Joint Pain Flare, Can't Cook",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR010\",\n  \"message\": \"viungo vyangu vinauma sana leo siwezi kupika\",\n  \"timestamp\": \"2025-01-20T12:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=physical_limitation+pain. Empathy. No-cook options: bread + boiled egg (if pre-cooked), banana, plain uji (minimal effort). Medication critical: Diclofenac at 12:00 must still have food even if minimal. Remind that skipping Metformin food anchor is risky. Suggest asking family member to help today."
+        },
+        {
+          "name": "48 Edge Case — Multiple Medications Conflict Query",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR010\",\n  \"message\": \"daktari amenipa dawa mpya — Atorvastatin kwa cholesterol, kuchukua jioni\",\n  \"timestamp\": \"2025-01-25T16:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=new_medication. Atorvastatin (statin) added to profile. Evening timing confirmed (statins work better at night). Food interaction: grapefruit juice blocks statin metabolism — flag and remove from suggestions. High-cholesterol foods now also flagged (fried foods, processed meats). System updates profile."
+        },
+        {
+          "name": "49 Edge Case — Blood Sugar Very Low (hypoglycaemia signal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR010\",\n  \"message\": \"nahisi kizunguzungu na jasho — damu yangu ya sukari inaweza kuwa chini\",\n  \"timestamp\": \"2025-01-20T10:30:00\"\n}"
+            }
+          },
+          "description": "EXPECT: PRIORITY TIER 1 — hypoglycaemia signal. Immediate instruction: eat fast-acting sugar NOW (half glass juice, 3 glucose sweets, or 1 tablespoon honey). Sit down. Do NOT take Metformin now. If dizziness persists or gets worse — call someone / go to hospital. System does not diagnose — it acts on the described symptoms and errs on the side of caution."
+        }
+      ]
+    },
+
+    {
+      "name": "── CROSS-CUTTING: Pantry Management ──",
+      "item": [
+        {
+          "name": "50 Pantry — Declare Tier 1 Bulk Stock",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/pantry/update",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"updates\": [\n    { \"ingredient\": \"maize_flour\", \"tier\": 1, \"action\": \"restock\", \"quantity\": \"4kg\" },\n    { \"ingredient\": \"rice\", \"tier\": 1, \"action\": \"restock\", \"quantity\": \"2kg\" },\n    { \"ingredient\": \"cooking_oil\", \"tier\": 1, \"action\": \"restock\", \"quantity\": \"500ml\" }\n  ]\n}"
+            }
+          },
+          "description": "EXPECT: Tier 1 items marked as bulk stock. Zero daily cost applied. Available freely in all suggestions. No budget charged."
+        },
+        {
+          "name": "51 Pantry — Weekly Stock Update (eggs tray)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/pantry/update",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"updates\": [\n    { \"ingredient\": \"eggs\", \"tier\": 2, \"action\": \"restock\", \"quantity\": 30, \"unit\": \"pieces\", \"cost_kes\": 180 }\n  ]\n}"
+            }
+          },
+          "description": "EXPECT: 30 eggs stocked. Cost amortized (~6 KES/egg). System tracks usage — decrements when eggs are selected. Prompts restock when estimated to fall below 5."
+        },
+        {
+          "name": "52 Pantry — WhatsApp Text Depletion Report",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR001\",\n  \"message\": \"nimemaliza mayai\",\n  \"timestamp\": \"2025-01-24T07:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: intent=pantry_update. Eggs marked depleted. Removed from all suggestions immediately. Added to shopping list. Morning plan regenerated without eggs — alternative proteins suggested."
+        },
+        {
+          "name": "53 Pantry — Shopping List Request",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/pantry/shopping-list/USR001"
+          },
+          "description": "EXPECT: Consolidated shopping list based on depleted Tier 2/3 items + projected needs for next 3 days. Budget estimate included. Items sorted by priority (medication-critical items first)."
+        }
+      ]
+    },
+
+    {
+      "name": "── CROSS-CUTTING: Hydration Engine ──",
+      "item": [
+        {
+          "name": "54 Hydration — Targets by Condition",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/hydration/targets",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"users\": [\n    { \"user_id\": \"USR001\", \"expected_ml\": 1800 },\n    { \"user_id\": \"USR002\", \"expected_ml\": 2200 },\n    { \"user_id\": \"USR004\", \"expected_ml\": 3200 },\n    { \"user_id\": \"USR008\", \"expected_ml\": 1200 }\n  ]\n}"
+            }
+          },
+          "description": "EXPECT: Each user returns their specific target. USR004 (very active) = 3200ml. USR008 (CKD) = 1200ml hard ceiling (not formula-based). Condition adjustments applied. Targets clamped to 1500-4000ml range (except CKD which has a doctor-prescribed ceiling)."
+        },
+        {
+          "name": "55 Hydration — H. Pylori Water Timing Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR006\",\n  \"message\": \"kunywa maji wakati wa chakula ni sawa?\",\n  \"timestamp\": \"2025-01-20T12:00:00\"\n}"
+            }
+          },
+          "description": "EXPECT: H. Pylori-specific answer. Water DURING meals dilutes stomach acid needed for H. Pylori treatment. Drink 30 min BEFORE meals instead. This applies specifically to ulcer and H. Pylori conditions."
+        }
+      ]
+    },
+
+    {
+      "name": "── CROSS-CUTTING: System-Wide Validation ──",
+      "item": [
+        {
+          "name": "56 Calorie Engine — BMR Calculations Audit",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/nutrition/calculate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profiles\": [\n    { \"id\": \"A\", \"gender\": \"female\", \"age\": 34, \"weight_kg\": 72, \"height_cm\": 163, \"activity\": \"sedentary\", \"goal\": \"weight_loss\",      \"expected_bmr\": 1420, \"expected_tdee\": 1704, \"expected_target\": 1204 },\n    { \"id\": \"B\", \"gender\": \"male\",   \"age\": 52, \"weight_kg\": 84, \"height_cm\": 172, \"activity\": \"light\",     \"goal\": \"diabetic_control\", \"expected_bmr\": 1680, \"expected_tdee\": 2310, \"expected_target\": 1600 },\n    { \"id\": \"C\", \"gender\": \"male\",   \"age\": 28, \"weight_kg\": 78, \"height_cm\": 180, \"activity\": \"very_active\",\"goal\": \"muscle_gain\",     \"expected_bmr\": 1820, \"expected_tdee\": 3458, \"expected_target\": 3758 }\n  ]\n}"
+            }
+          },
+          "description": "EXPECT: All 3 calculations return within ±50 kcal of expected values. Mifflin-St Jeor formula confirmed. Activity multipliers: sedentary=1.2, light=1.375, very_active=1.9. Deficit -500 for weight loss, surplus +300 for muscle gain, -200 for diabetic control."
+        },
+        {
+          "name": "57 Condition Flag — Verify Exclusions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/nutrition/condition-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition\": \"type2_diabetes\",\n  \"check_ingredients\": [\"ugali\", \"white_rice\", \"sugar\", \"sorghum_uji\", \"sweet_potato\", \"brown_rice\", \"millet\", \"beans\"]\n}"
+            }
+          },
+          "description": "EXPECT: ugali=EXCLUDED, sugar=EXCLUDED, white_rice=REDUCED+FLAGGED, sweet_potato=ALLOWED (low GI), brown_rice=ALLOWED (small portion), sorghum_uji=PREFERRED, millet=PREFERRED, beans=ALLOWED."
+        },
+        {
+          "name": "58 Condition Flag — H. Pylori Exclusions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/nutrition/condition-check",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"condition\": \"h_pylori\",\n  \"check_ingredients\": [\"coffee\", \"pilipili\", \"soda\", \"oranges\", \"ugali\", \"uji\", \"eggs\", \"milk\", \"ginger_tea\"]\n}"
+            }
+          },
+          "description": "EXPECT: coffee=BLOCKED, pilipili=BLOCKED, soda=BLOCKED, oranges=BLOCKED (acidic), ugali=ALLOWED, uji=PREFERRED (gentle), eggs=PREFERRED (boiled), milk=PREFERRED (coats stomach), ginger_tea=ALLOWED (anti-nausea)."
+        },
+        {
+          "name": "59 Intent Classification — Grok Multi-Class",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/intent/classify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"id\": 1, \"text\": \"niko busy sana leo sina time ya breakfast\",       \"expected\": \"meal_skip+time_constraint\" },\n    { \"id\": 2, \"text\": \"nimechoka na ugali kila siku\",                     \"expected\": \"meal_feedback+variety_request\" },\n    { \"id\": 3, \"text\": \"nimepoteza kilo moja!\",                             \"expected\": \"progress_update\" },\n    { \"id\": 4, \"text\": \"sijala breakfast bado\",                             \"expected\": \"medication_safety_tier1\" },\n    { \"id\": 5, \"text\": \"doctor amesema nipunguze wanga zaidi\",              \"expected\": \"goal_change+medical_instruction\" },\n    { \"id\": 6, \"text\": \"protein powder yameisha\",                           \"expected\": \"pantry_update+nutrition_gap\" },\n    { \"id\": 7, \"text\": \"nimechoka sana leo kazi ilikuwa ngumu\",             \"expected\": \"fatigue+emotional_state\" },\n    { \"id\": 8, \"text\": \"sijisikii vizuri dawa zinanisumbua\",                \"expected\": \"side_effect+treatment_concern\" },\n    { \"id\": 9, \"text\": \"naona njaa sana\",                                   \"expected\": \"hunger+unusual_time\" },\n    { \"id\": 10,\"text\": \"nimemaliza dawa yangu yote leo\",                   \"expected\": \"medication_complete\" }\n  ]\n}"
+            }
+          },
+          "description": "EXPECT: All 10 classifications correct. Note message #4 (sijala breakfast bado) must classify as medication_safety_tier1 WHEN the user has medication anchors — context-aware classification, not just text-based."
+        },
+        {
+          "name": "60 Priority Tier — Medication Safety Always Fires",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/webhook/whatsapp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"USR002\",\n  \"message\": \"sijala breakfast bado\",\n  \"timestamp\": \"2025-01-20T08:15:00\",\n  \"test_inactive_user\": true,\n  \"days_since_last_engagement\": 5\n}"
+            }
+          },
+          "description": "EXPECT: Even with inactive_user=true and 5 days no engagement, Tier 1 medication safety response STILL fires. This validates the priority tier system — safety overrides engagement-based message suppression. Response must be urgent, not batched."
+        }
+      ]
+    }
+
+  ]
+}
