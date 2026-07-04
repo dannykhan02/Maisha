@@ -55,6 +55,45 @@ backstop.
 **Files touched:**
 - `.githooks/pre-commit` — new, executable, 73 lines
 
+### ✅ Hardened `MAISHA_INTERNAL_SECRET` loading in `testing/maisha_test.sh` (Resolved — 2026-07-04)
+Previously, line 12 read:
+
+    INTERNAL_TOKEN="${MAISHA_INTERNAL_SECRET:-test-secret-change-me}"
+
+which silently fell back to a placeholder if the secret wasn't exported,
+causing every Flask endpoint enforcing `X-Maisha-Internal-Token` to fail
+with 403 while unprotected endpoints passed — a confusing partial-failure
+pattern (see original note in Smaller known issues, now removed below).
+
+- [x] Script now resolves `MAISHA_INTERNAL_SECRET` in priority order:
+      (1) already-exported value (e.g. CI), (2) `backend/maisha-api/.env`,
+      resolved relative to the script's own location via `$SCRIPT_DIR` so
+      it works regardless of invocation directory (repo root or from
+      inside `testing/`)
+- [x] Extraction strips surrounding quotes and trailing
+      comments/whitespace from the `.env` value
+- [x] Fails loudly with exit code 1 and an actionable error message if
+      neither source has it — no silent placeholder fallback
+- [x] Verified priority: real `.env` value confirmed
+      (`maisha-dev-secret-change-in-production`), then a different value
+      manually exported — script used the exported override, not `.env`,
+      confirmed via temporary debug line (since removed)
+- [x] Verified failure path: `.env` temporarily moved aside, nothing
+      exported — script printed the exact designed error message and
+      exited 1
+- [x] Verified success path: with `.env` present, script loads the
+      secret and proceeds into test execution without error
+
+**Not yet verified — outstanding:** a full suite re-run with real
+pass/fail counts to confirm zero regressions from this change. Blocked
+at time of this fix by Laravel/Flask not running locally, so the suite
+timed out before completion. Tracked below in Smaller known issues —
+do not assume 205/206 still holds until this is actually re-run and a
+real number is captured.
+
+**Files touched:**
+- `testing/maisha_test.sh` — secret-loading block (lines ~9-30)
+
 ### ✅ Git repo initialization + exposed secrets in initial commit (Resolved — 2026-07-03)
 
 First commit to the new `Maisha` GitHub repo (`backend/` + `ai-engine/`)
@@ -143,9 +182,9 @@ malformed-input checks on `/utakulaa`) to fail with 403, while
 endpoints with no auth check pass regardless — a confusing
 partial-failure pattern that looked like an application bug but
 wasn't. Always `export MAISHA_INTERNAL_SECRET=<value from
-backend/maisha-api/.env>` before running the suite. Script itself not
-yet hardened to read `.env` directly — worth doing so this can't
-silently recur (tracked below in Smaller known issues).
+backend/maisha-api/.env>` before running the suite. **Update
+2026-07-04: this has since been hardened — see the Resolved entry
+above.**
 
 **Verification:** full suite re-run after every sub-step, final result
 205/206 passing (1 pre-existing unrelated flake — Brenda's
@@ -527,15 +566,11 @@ testing.
 
 ## Smaller known issues (non-blocking)
 
-- `testing/maisha_test.sh` reads `MAISHA_INTERNAL_SECRET` from the
-  shell environment with a silent placeholder fallback
-  (`${MAISHA_INTERNAL_SECRET:-test-secret-change-me}`) rather than
-  reading `.env` directly — must remember to `export
-  MAISHA_INTERNAL_SECRET=<value from backend/maisha-api/.env>` before
-  every run, or internal-token-protected endpoints silently 403 while
-  others pass, producing a confusing partial-failure pattern. Not yet
-  hardened to read `.env` directly — worth doing so this can't
-  silently recur.
+- `testing/maisha_test.sh`'s secret-loading fix (2026-07-04, see
+  Resolved above) has not yet had a full suite re-run against live
+  Laravel/Flask services to confirm the 205/206 baseline still holds.
+  Start both services + confirm pm2 queue worker is online, then
+  re-run and record the real pass count here.
 - `commands.php`'s useful deployment/setup notes have not yet been
   moved to a sanitized local reference file — currently just sitting
   gitignored on disk with pre-rotation key values still in it. Low
@@ -577,10 +612,6 @@ testing.
   session — not confirmed to have caused any issue, but noted as a
   possible source of slow webhook responses (which is what triggers
   Twilio retries) if similar anomalies show up again.
-- No pre-commit secrets check exists yet (e.g. `git-secrets` or a
-  simple grep hook) — the `commands.php` incident was only caught by
-  GitHub's push protection after the fact. Worth adding before the
-  next credential-bearing file gets added to any service.
 
 ---
 
@@ -614,6 +645,9 @@ testing.
 - Initial GitHub repo push — clean, no secrets present on remote,
   confirmed by direct inspection of `origin/main` (see Resolved — Git
   repo initialization + exposed secrets in initial commit)
+- Pre-commit secrets scanning — active on this repo via
+  `.githooks/pre-commit`, verified to block/bypass/pass correctly
+  (see Resolved — Pre-commit secrets-scanning hook)
 
 ---
 
@@ -621,6 +655,11 @@ testing.
 
 **Baseline: 205/206 passing** (as of 2026-07-03 session, post Schema
 Consolidation Phase 2 — full suite re-run after every sub-step).
+
+**Note (2026-07-04):** this baseline has not yet been re-confirmed after
+the `maisha_test.sh` secret-loading hardening — see Smaller known
+issues. Don't assume 205/206 still holds until re-run with real
+Laravel/Flask services up.
 
 - 1 failed: Brenda "Complete without goals → 422" — got 401 instead
   (pre-existing, unrelated; logged above)
@@ -648,6 +687,13 @@ Previously fixed:
 
 ## Changelog
 
+- **2026-07-04** — Hardened `MAISHA_INTERNAL_SECRET` loading in
+  `testing/maisha_test.sh`: replaced silent placeholder fallback with
+  priority-ordered resolution (export → `.env` → loud failure).
+  Verified priority, failure, and success paths individually with real
+  evidence. Full-suite regression confirmation still pending —
+  Laravel/Flask weren't running at fix time, so the suite timed out
+  before producing a pass count.
 - **2026-07-03** — Initial git repo pushed to GitHub. First push attempt
   blocked by push protection (hardcoded GCP + Anthropic keys in
   `commands.php`, an orphaned non-code notes file). Confirmed unused via
@@ -671,9 +717,10 @@ Previously fixed:
   originally in scope): `testing/maisha_test.sh` silently falls back to a
   placeholder internal-token secret if `MAISHA_INTERNAL_SECRET` isn't
   exported first, causing a confusing partial 403 pattern — documented,
-  not yet hardened. Full suite re-run after each sub-step, final result
-  205/206 (same single pre-existing flake, no new failures). Item #7
-  (frontend architecture audit) is now the sole remaining open item.
+  not yet hardened at the time (see 2026-07-04 entry above for the fix).
+  Full suite re-run after each sub-step, final result 205/206 (same
+  single pre-existing flake, no new failures). Item #7 (frontend
+  architecture audit) is now the sole remaining open item.
 - **2026-07-02** — WhatsApp webhook rate limiting (global + per-sender
   throttle) completed and verified under real load. Sent 14 rapid
   messages via live Twilio sandbox: log confirmed 10 consecutive
