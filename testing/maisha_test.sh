@@ -9,7 +9,28 @@
 # ── Config ────────────────────────────────────────────────────────────────────
 LARAVEL="http://localhost:8000/api"
 FLASK="http://localhost:5000/api"
-INTERNAL_TOKEN="${MAISHA_INTERNAL_SECRET:-test-secret-change-me}"
+
+# Load MAISHA_INTERNAL_SECRET from environment or .env file
+if [[ -z "$MAISHA_INTERNAL_SECRET" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  ENV_FILE="$SCRIPT_DIR/../backend/maisha-api/.env"
+  
+  if [[ -f "$ENV_FILE" ]]; then
+    # Extract value, strip quotes and comments
+    MAISHA_INTERNAL_SECRET=$(grep "^MAISHA_INTERNAL_SECRET=" "$ENV_FILE" | cut -d= -f2 | sed 's/^["'"'"']//;s/["'"'"'].*$//' | xargs)
+  fi
+fi
+
+if [[ -z "$MAISHA_INTERNAL_SECRET" ]]; then
+  echo "ERROR: MAISHA_INTERNAL_SECRET not found!" >&2
+  echo "  - Not exported in environment" >&2
+  echo "  - Not found in backend/maisha-api/.env" >&2
+  echo "Please set it before running tests:" >&2
+  echo "  export MAISHA_INTERNAL_SECRET=<value from backend/maisha-api/.env>" >&2
+  exit 1
+fi
+
+INTERNAL_TOKEN="$MAISHA_INTERNAL_SECRET"
 
 # Colours
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
