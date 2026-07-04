@@ -60,6 +60,13 @@ say so explicitly and sequence the work service-by-service.
   availability), not one monolithic function.
 
 ### frontend/ — React/TS/Vite
+- **Lives in its own separate git repository** — not tracked in this repo
+  at all (`frontend/` is in `.gitignore` here). Any frontend work happens
+  in that repo, not this one. If a task needs frontend context, it must
+  be provided separately — Cline has no visibility into frontend/ from
+  within this repo's working tree, unless the frontend repo happens to be
+  checked out locally alongside it (as it currently is on this dev
+  machine — don't assume that's always true).
 - Component/hook structure conventions TBD — treat as provisional until a
   proper frontend pass has been done (check `PROJECT_STATE.md`).
 - API calls belong in a dedicated layer, not scattered in components.
@@ -88,6 +95,12 @@ say so explicitly and sequence the work service-by-service.
 9. **Before adding a new field/table for something that might already be
    tracked**, check `PROJECT_STATE.md`'s data-ownership notes first —
    don't create a third place to store the same concept.
+10. **This repo does not contain the frontend.** Don't attempt to read,
+    grep, or reference `frontend/` files when investigating an issue as
+    if they're guaranteed to exist in this working tree. If a task
+    appears to need frontend context, flag that explicitly rather than
+    assuming absence of a caller means a feature is unused frontend-side
+    — confirm the frontend repo is actually available to check first.
 
 ---
 
@@ -106,7 +119,7 @@ open questions, not get silently skipped.
 | 🏗️ **Architect** | Service boundaries, cross-cutting design | Is this the right service to own this logic? Does it introduce coupling that will hurt later? Does it match the layer boundaries in Section 1? |
 | 👨‍💻 **Laravel Engineer** | `backend/` | Controller stays thin, logic goes in a Service class, validation uses Form Requests, follows existing model/route conventions |
 | 🐍 **AI Engineer** | `ai-engine/` | Layer boundaries respected (`resources`/`engine`/`providers`/`clients`), any config value added is actually wired in somewhere, provider fallback pattern followed |
-| 🎨 **Frontend Engineer** | `frontend/` | Typed, API calls isolated from components, consistent with whatever frontend conventions exist |
+| 🎨 **Frontend Engineer** | `frontend/` (separate repo) | Typed, API calls isolated from components, consistent with whatever frontend conventions exist |
 | 🗄️ **Database Engineer** | Migrations, schema | Index/FK implications, and critically: does this duplicate a concept already tracked elsewhere (check `PROJECT_STATE.md`) |
 | 🔒 **Security Engineer** | Auth, public endpoints, secrets, rate limits | No plaintext secrets in logs, no new unauthenticated surface without a reason, token/session handling is sound |
 | 🧪 **QA Engineer** | `testing/` | Does this need a new test or update an existing one; is test data idempotent; does the fix actually address the root cause |
