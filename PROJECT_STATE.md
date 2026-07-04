@@ -13,6 +13,8 @@ pre-existing, unrelated failure; see Smaller known issues).
 
 ### 7. ⚪ Frontend architecture — not yet analyzed
 Do a proper Plan-mode pass on `frontend/` before building major new UI.
+Note: `frontend/` lives in its own separate git repository, not this one
+— confirm it's checked out and accessible before starting this audit.
 Now the sole remaining open item — and the natural trigger point for
 finally deciding `UserGoal`'s long-term fate (see Schema Consolidation
 Phase 2, Goals sub-item, below).
@@ -20,6 +22,81 @@ Phase 2, Goals sub-item, below).
 ---
 
 ## Resolved
+
+### ✅ Pre-commit secrets-scanning hook (Resolved — 2026-07-04)
+Implemented the pre-commit follow-up from the `commands.php` incident
+(PROJECT_STATE.md, lines 548–550). A lightweight git hook now scans staged
+file contents before allowing commits, catching hardcoded credentials at
+commit time rather than relying solely on GitHub push protection as a
+backstop.
+
+- [x] Created `.githooks/pre-commit` with regex patterns for GCP keys
+      (`AIza...`), Anthropic keys (`sk-ant-...`), and Twilio SIDs
+      (`AC.../SK...`)
+- [x] Configured git to use `.githooks` as the active hooks path via
+      `git config core.hooksPath .githooks`
+- [x] Made hook executable (`chmod +x`, confirmed `-rwxr-xr-x`)
+- [x] Verified blocking behavior: commit with fake GCP key correctly
+      blocked with clear error message
+- [x] Verified bypass: `git commit --no-verify` successfully bypassed
+      hook for confirmed false positives
+- [x] Verified clean commits pass silently: no false positives on normal
+      code, hook produces no output on clean path
+- [x] Hook file committed to repo (commit 738878f)
+
+**Verification (raw terminal output):**
+- Clean commit: `[main 537421a] test: clean commit should pass` (no hook
+  output, committed immediately)
+- Blocked commit: `✗ BLOCKED: GCP API key detected in test_secret_file.txt`
+  + `Commit blocked: hardcoded secrets detected.` (exit 1)
+- Bypass: `[main 3e3ed89] test: bypass hook with --no-verify` (committed
+  despite secret)
+
+**Files touched:**
+- `.githooks/pre-commit` — new, executable, 73 lines
+
+### ✅ Git repo initialization + exposed secrets in initial commit (Resolved — 2026-07-03)
+
+First commit to the new `Maisha` GitHub repo (`backend/` + `ai-engine/`)
+was blocked by GitHub push protection — `backend/maisha-api/commands.php`
+(a root-level, non-autoloaded notes/reference file, not application code)
+contained hardcoded GCP and Anthropic API keys.
+
+- [x] Confirmed via Cline investigation: `commands.php` is not required,
+      included, autoloaded, or invoked anywhere in the codebase (checked
+      direct includes, `composer.json` autoload/scripts, `bootstrap/app.php`,
+      `routes/console.php`, Supervisor/Systemd configs, `Makefile`,
+      `setup_git.sh`) — confirmed orphaned, safe to untrack
+- [x] File content confirmed to be shell commands + deployment notes, not
+      executable PHP — never actually reachable at runtime regardless
+- [x] Removed from tracking via `git rm --cached` + added to `.gitignore`,
+      folded into the still-unpushed initial commit via `git commit --amend`
+      (no rewrite of already-public history needed, since the first push
+      attempt was rejected by push protection before any objects reached
+      GitHub)
+- [x] Verified post-amend: `git show HEAD:...commands.php` returns nothing
+      locally; `git show origin/main:...commands.php` confirms absent on
+      remote too
+- [x] Push succeeded clean on retry, 201 files, no protection triggers
+- [x] Exposed GCP (2 keys) and Anthropic API keys rotated as a precaution,
+      despite confirmation the keys were never actually accepted onto
+      GitHub's servers
+- [ ] **Not yet done:** move `commands.php`'s useful reference content
+      (deployment/setup notes) to a sanitized, placeholder-only local file
+      outside the repo, or delete outright if no longer needed — currently
+      just sitting locally, gitignored but unsanitized (still has real
+      key values on disk pre-rotation copies). Low priority, no app risk,
+      but should be closed out.
+
+**Root cause, for future commits:** no `.env`/secrets pre-commit check was
+in place before this first push. Worth considering a lightweight pre-commit
+hook (e.g. `git-secrets` or a simple grep pattern check for `AIza`/`sk-ant-`
+prefixes) before any future service adds a new credential-bearing file,
+rather than relying on GitHub push protection as the only backstop.
+
+**Files touched:**
+- `.gitignore` — added `backend/maisha-api/commands.php`
+- `backend/maisha-api/commands.php` — untracked (not deleted from disk)
 
 ### ✅ Schema Consolidation — Phase 2 (Resolved — 2026-07-03)
 - [x] `UserHealthProfile`: confirmed dead (0 rows, only referenced by
@@ -459,6 +536,11 @@ testing.
   others pass, producing a confusing partial-failure pattern. Not yet
   hardened to read `.env` directly — worth doing so this can't
   silently recur.
+- `commands.php`'s useful deployment/setup notes have not yet been
+  moved to a sanitized local reference file — currently just sitting
+  gitignored on disk with pre-rotation key values still in it. Low
+  priority, no application risk (file is orphaned and unreachable at
+  runtime, confirmed), but should be cleaned up.
 - `whatsapp_messages` has no `user_id` column — can't link messages to
   users without parsing payload (partially mitigated:
   `WhatsappSession.user_id` now works, but the message itself still
@@ -495,6 +577,10 @@ testing.
   session — not confirmed to have caused any issue, but noted as a
   possible source of slow webhook responses (which is what triggers
   Twilio retries) if similar anomalies show up again.
+- No pre-commit secrets check exists yet (e.g. `git-secrets` or a
+  simple grep hook) — the `commands.php` incident was only caught by
+  GitHub's push protection after the fact. Worth adding before the
+  next credential-bearing file gets added to any service.
 
 ---
 
@@ -525,6 +611,9 @@ testing.
   the dead `UserHealthProfile` table — all decided and confirmed via
   row counts + code grep, not assumption (see Resolved — Schema
   Consolidation Phase 2)
+- Initial GitHub repo push — clean, no secrets present on remote,
+  confirmed by direct inspection of `origin/main` (see Resolved — Git
+  repo initialization + exposed secrets in initial commit)
 
 ---
 
@@ -559,6 +648,12 @@ Previously fixed:
 
 ## Changelog
 
+- **2026-07-03** — Initial git repo pushed to GitHub. First push attempt
+  blocked by push protection (hardcoded GCP + Anthropic keys in
+  `commands.php`, an orphaned non-code notes file). Confirmed unused via
+  Cline investigation, untracked + gitignored, commit amended (no history
+  rewrite needed since nothing had reached GitHub yet), keys rotated as
+  precaution, second push succeeded clean.
 - **2026-07-03** — Schema Consolidation Phase 2 fully closed, all five
   sub-items resolved. `UserHealthProfile` confirmed dead (0 rows) and
   deleted along with its one-off merge command. `HealthProfile.medications`
