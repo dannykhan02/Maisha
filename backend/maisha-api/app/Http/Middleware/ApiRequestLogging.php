@@ -21,8 +21,8 @@ class ApiRequestLogging
         $requestId = Str::uuid()->toString();
         $request->attributes->set('request_id', $requestId);
 
-        // Log incoming request
-        Log::info('API request', [
+        // Log incoming request to api_audit channel
+        Log::channel('api_audit')->info('API request', [
             'request_id' => $requestId,
             'method'     => $request->method(),
             'path'       => $request->path(),
@@ -39,8 +39,8 @@ class ApiRequestLogging
         $response->header('X-Frame-Options', 'DENY');
         $response->header('X-XSS-Protection', '1; mode=block');
 
-        // Log response
-        Log::info('API response', [
+        // Log response to api_audit channel
+        Log::channel('api_audit')->info('API response', [
             'request_id' => $requestId,
             'status'     => $response->status(),
             'user_id'    => $request->user()?->id,

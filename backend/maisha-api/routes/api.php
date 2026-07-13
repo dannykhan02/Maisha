@@ -29,13 +29,19 @@ use App\Http\Controllers\MealSelectionController;
 use App\Http\Controllers\WhatsAppWebhookController;
 
 // ─────────────────────────────────────────────
-// Auth routes — 10 req/min per IP
+// Auth routes — register & OAuth — 10 req/min per IP
 // ─────────────────────────────────────────────
 Route::middleware('throttle:auth')->group(function () {
     Route::post('/register',            [AuthController::class, 'register']);
-    Route::post('/login',               [AuthController::class, 'login']);
     Route::get('/auth/google',          [AuthController::class, 'googleRedirect']);
     Route::get('/auth/google/callback', [AuthController::class, 'googleCallback']);
+});
+
+// ─────────────────────────────────────────────
+// Login route — 5 req/min per email+IP
+// ─────────────────────────────────────────────
+Route::middleware('throttle:login-attempts')->group(function () {
+    Route::post('/login', [AuthController::class, 'login']);
 });
 
 // ─────────────────────────────────────────────
@@ -91,8 +97,8 @@ Route::get('/login', function () {
 
 // ─────────────────────────────────────────────
 // Protected Routes (Bearer token required)
-// ─────────────────────────────────────────────
-Route::middleware('auth:sanctum')->group(function () {
+// ─────────────────────────────────────────────────────────────────
+Route::middleware(['auth:sanctum', 'api.logging'])->group(function () {
 
     // Authentication
     Route::post('/logout', [AuthController::class, 'logout']);

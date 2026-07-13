@@ -562,7 +562,7 @@ subsection "Flask — Brian hydration (heavy sweat)"
 flask_post "/hydration/calculate" \
   '{"weight_kg":80,"activity_level":"very_active","health_conditions":[],"active_slots":["pre_workout","breakfast","lunch","post_workout","dinner"]}'
 check "Brian athlete hydration" 200 "$HTTP_CODE" "target_ml" "$BODY"
-TARGET=$(echo "$BODY" | grep -o '"target_ml":[0-9]*' | cut -d: -f2)
+TARGET=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('target_ml', ''))")
 echo -e "  ${CYAN}Hydration target: ${TARGET}ml (expect ~3200ml)${NC}"
 
 # ── USER 5 — MARY ─────────────────────────────────────────────────────────────
@@ -755,9 +755,8 @@ check "Grace sodium-restricted profile" 200 "$HTTP_CODE" "saved" "$BODY"
 
 subsection "Goal — target weight"
 api_post "$LARAVEL/profile/goals" \
-  '{"primary_goal":"manage_condition","secondary_goals":["eat_better","lose_weight"],"target_weight_kg":68,"timeline_weeks":24}' "$TOKEN_GRACE"
-check "Grace goal with target weight" 200 "$HTTP_CODE" "saved" "$BODY"
-
+  '{"primary_goal":"manage_condition","secondary_goals":["eat_better","lose_weight"]}' "$TOKEN_GRACE"
+check "Grace goal save" 200 "$HTTP_CODE" "saved" "$BODY"
 api_get "$LARAVEL/profile/goals" "$TOKEN_GRACE"
 check "Grace goals retrieval" 200 "$HTTP_CODE" "primary_goal" "$BODY"
 
@@ -962,7 +961,7 @@ subsection "Flask — pregnancy hydration (higher target)"
 flask_post "/hydration/calculate" \
   '{"weight_kg":65,"activity_level":"light","health_conditions":["pregnancy_t2"],"active_slots":["breakfast","mid_morning","lunch","afternoon","dinner"]}'
 check "Fatuma pregnancy hydration" 200 "$HTTP_CODE" "target_ml" "$BODY"
-TARGET=$(echo "$BODY" | grep -o '"target_ml":[0-9]*' | cut -d: -f2)
+TARGET=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('target_ml', ''))")
 echo -e "  ${CYAN}Pregnancy hydration target: ${TARGET}ml${NC}"
 
 # ── USER 10 — SAMUEL ──────────────────────────────────────────────────────────
@@ -1064,7 +1063,7 @@ subsection "Flask — CKD restricted hydration"
 flask_post "/hydration/calculate" \
   '{"weight_kg":72,"activity_level":"light","health_conditions":["ckd_stage3","hypertension"],"active_slots":["breakfast","lunch","afternoon","dinner"]}'
 check "Samuel CKD hydration (restricted)" 200 "$HTTP_CODE" "target_ml" "$BODY"
-TARGET=$(echo "$BODY" | grep -o '"target_ml":[0-9]*' | cut -d: -f2)
+TARGET=$(echo "$BODY" | python3 -c "import sys, json; print(json.load(sys.stdin).get('target_ml', ''))")
 echo -e "  ${CYAN}CKD hydration target: ${TARGET}ml (expect <1500ml if anuric)${NC}"
 
 subsection "Profile completion — medical complexity"

@@ -7,11 +7,6 @@ from engine.flask_response_cache import check_and_record
 
 class UtakulaaResource(Resource):
     def post(self):
-        token    = request.headers.get('X-Maisha-Internal-Token', '')
-        expected = os.getenv('MAISHA_INTERNAL_SECRET', '')
-        if not expected or token != expected:
-            return {'error': 'Unauthorized'}, 403
-
         payload = request.get_json(silent=True)
         if not payload:
             return {'error': 'Empty or invalid JSON payload'}, 400

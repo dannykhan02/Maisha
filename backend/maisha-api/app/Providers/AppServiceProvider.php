@@ -32,13 +32,28 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        // Login / register / Google OAuth
+        // Register / Google OAuth — 10 req/min per IP
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(10)
                 ->by($request->ip())
                 ->response(function () {
                     return response()->json([
                         'message' => 'Too many attempts. Please wait a moment and try again.',
+                    ], 429);
+                });
+        });
+
+        // Login attempts — 5 req/min per email+IP combination
+        // Prevents credential-stuffing against a single account while allowing
+        // different users from the same IP to retry independently
+        RateLimiter::for('login-attempts', function (Request $request) {
+            $email = $request->input('email', '');
+            $key = $email . '|' . $request->ip();
+            return Limit::perMinute(5)
+                ->by($key)
+                ->response(function () {
+                    return response()->json([
+                        'message' => 'Too many login attempts. Please wait a moment and try again.',
                     ], 429);
                 });
         });

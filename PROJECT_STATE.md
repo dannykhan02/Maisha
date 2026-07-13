@@ -5,23 +5,167 @@ or a new issue is discovered. `AI_GUIDELINES.md` tells Cline how to work;
 this file tells it what's currently true about the project.
 
 **Test baseline:** 205/206 passing (as of 2026-07-03 session — 1
-pre-existing, unrelated failure; see Smaller known issues).
+pre-existing, unrelated failure; see Smaller known issues). **Not yet
+re-confirmed after Item #7's changes — see that entry below.**
 
 ---
 
 ## Open items, in priority order
 
-### 7. ⚪ Frontend architecture — not yet analyzed
-Do a proper Plan-mode pass on `frontend/` before building major new UI.
-Note: `frontend/` lives in its own separate git repository, not this one
-— confirm it's checked out and accessible before starting this audit.
-Now the sole remaining open item — and the natural trigger point for
-finally deciding `UserGoal`'s long-term fate (see Schema Consolidation
-Phase 2, Goals sub-item, below).
+*(None carried over from the previous session — Item #7 closed below.
+Three new, smaller items were found as a side effect of closing it; see
+"Smaller known issues" for `Workout.tsx`, the `Diet.tsx`/`Medical.tsx`
+conditional-hooks bug, and the "Powered by xAI Grok" string. None of
+these were introduced by Item #7's changes — all three are pre-existing
+and were only surfaced because `npm run lint`/`typecheck` were run for
+the first time as part of closing it out.)*
 
 ---
 
 ## Resolved
+
+### ✅ Item #7 — Frontend architecture audit + UserGoal decision (Resolved — 2026-07-04)
+Full audit completed first (directory tree, package.json, API layer
+pattern, hooks, strict-mode confirmation, zero test files, zero
+`UserGoal`/`target_weight_kg`/`timeline_weeks` references anywhere in
+`frontend/src` — all documented in the raw findings from that pass).
+That audit surfaced the actual decision this item existed to force, per
+the Goals sub-item under Schema Consolidation Phase 2 below: `UserGoal`
+has one real row, real columns with no equivalent anywhere else
+(`target_weight_kg`, `timeline_weeks`), and zero frontend callers.
+**Decided: not dead** — this is unfinished product surface (weight/
+muscle goal tracking), not leftover debt. Built the missing screen
+rather than dropping the table.
+
+- [x] `app/Http/Controllers/GoalController.php` — added real enum
+      validation (`VALID_GOALS`) matching the frontend's goal
+      vocabulary, where previously any string was accepted; rejects
+      `target_weight_kg`/`timeline_weeks` on goals that aren't
+      `lose_weight`/`gain_muscle` (422 instead of silently accepting
+      meaningless data); `show()` now also returns `current_weight_kg`
+      so the frontend doesn't need a second round trip
+- [x] `app/Models/UserGoal.php` — comment updated to reflect a frontend
+      caller now exists; added casts for `target_weight_kg`
+      (`decimal:1`) and `timeline_weeks` (`integer`), previously uncast
+- [x] `tests/Feature/GoalControllerTest.php` — new, 7 tests / 16
+      assertions, **run against a real database via `RefreshDatabase`,
+      not simulated**: sync-to-`primary_goals` on write, idempotent
+      `updateOrCreate` behavior, invalid-enum rejection (422),
+      target-weight-on-wrong-goal rejection (422), valid `gain_muscle`
+      case with weight tracking, `show()` response shape both with and
+      without an existing goal
+- [x] `src/lib/goalOptions.ts` — new. `PRIMARY_GOALS` extracted from
+      `Onboarding.tsx` (previously defined locally there only) so
+      onboarding and the new Settings screen share one vocabulary
+      instead of duplicating it — this is the same list the backend
+      enum above validates against, closing a real drift risk (the
+      onboarding flow used a list, `GoalController` expected a single
+      unvalidated string)
+- [x] `src/lib/api.ts` — added `goalApi` (`show`/`update`) and the
+      matching `UserGoal`, `GoalShowResponse`, `GoalUpdatePayload`
+      types
+- [x] `src/pages/Settings.tsx` — new "Goals" tab, backed by a new
+      `GoalsSection` component: loads the existing goal via
+      `goalApi.show()` on mount, lets the user pick a primary goal from
+      the same list onboarding uses, shows target-weight/timeline
+      inputs only when the selected goal supports tracking
+      (`supportsWeightTarget`), secondary-goal multi-select, saves via
+      `goalApi.update()`. Replaces the old Profile-tab goal chips,
+      which were confirmed dead UI — no `onClick`, no state, no save
+      path at all, not just an audit false-positive.
+      **Real bug found and fixed during test-writing, not by manual
+      review:** the secondary-goal chip list was rendering the
+      not-yet-selected primary goal too on first load, because the
+      filter (`g.value !== primaryGoal`) compared against `primaryGoal`
+      while it was still `null` — so nothing got excluded until a
+      selection was made. Fixed by gating the entire secondary section
+      on `primaryGoal` being truthy, which also makes more UX sense
+      (no reason to show "also working on" options before a main goal
+      is chosen).
+- [x] Test scaffolding added from scratch — **zero test files existed
+      anywhere in this repo before this item, confirmed in the original
+      audit**. `vitest` + `@testing-library/react` + `jsdom` wired into
+      `vite.config.ts` (using `defineConfig` from `'vitest/config'`,
+      a drop-in superset of Vite's own, so no second config file was
+      needed) and `package.json`. 16 unit tests for `Onboarding.tsx`'s
+      `validateStep` — every expected value was independently run
+      against the real function logic before being committed to the
+      test file, not just hand-written and trusted. 2 smoke tests for
+      the new Goals tab (one caught the bug above; the other required
+      wrapping the render in `MemoryRouter` since `Settings.tsx` uses
+      `<Link>`, which throws without router context).
+- [x] **Separately found and fixed, not originally in scope for this
+      item:** `GenerateDailyMealPlans` required `--test-user`, and the
+      scheduler entry in `routes/console.php` was hardcoded to
+      `--test-user=1` — meaning "daily meal plan generation," as
+      shipped, would never have generated a plan for anyone except one
+      specific test account, regardless of whether the cron was
+      activated. `--test-user` is now optional; omitting it runs the
+      batch across every onboarded user, with per-user try/catch so one
+      Flask hiccup doesn't kill the whole batch. Summary line now
+      reports `X generated, Y skipped (limit), Z failed`.
+
+**Verified (real runs, not simulated):**
+- Backend: `php artisan test --filter=GoalControllerTest` →
+  `7 passed (16 assertions)`, real DB via `RefreshDatabase`
+- Frontend: `npm run test` → `18 passed (18)` across both new test
+  files, run against this actual repo — including catching and fixing
+  three real, unrelated-to-each-other bugs along the way (a missing
+  `MemoryRouter` wrapper, a `getByText` ambiguity from two elements
+  sharing the same text, and the secondary-goal-chip bug above)
+- `npm run typecheck` / `npm run lint` run afterward to confirm no new
+  errors introduced by these changes specifically (both tools surfaced
+  a substantial amount of **pre-existing, unrelated debt** — see new
+  Smaller known issues entries below — none of it touches files this
+  item changed)
+- One unused-state warning that *was* in a file this item delivered
+  (`Onboarding.tsx`'s `_animDir`, pre-existing in the original file but
+  now our responsibility since we touched the file) was fixed cleanly:
+  changed to `const [, setAnimDir] = useState(...)` so nothing is bound
+  to the unused read side.
+
+**NOT yet verified — do not assume this is production-proven until
+these are done:**
+- [ ] **No end-to-end run through the actual running app.** Nobody has
+      logged into the real app in a browser, clicked through to
+      Settings > Goals, and confirmed a row actually lands in the real
+      dev database via the live UI plus a real network call. Everything
+      verified above proves the component logic and the backend logic
+      correctly *in isolation*; it does not prove the live handoff
+      between them — real auth token present in `localStorage` from an
+      actual login, real dev-server proxy/CORS behavior, a real request
+      round trip. Recommended check: start Laravel + Flask + `npm run
+      dev` together, log in as an existing test user (e.g.
+      `samuel@maisha.test`), click through to Settings > Goals, save a
+      goal, then confirm via `php artisan tinker` →
+      `UserGoal::where('user_id', ...)->first()` against the real dev
+      DB, not the throwaway `RefreshDatabase` test DB.
+- [ ] **Scheduler's all-users mode has not been dry-run.** Highest-stakes
+      unverified item in this batch — going live fires real Claude/Flask
+      calls against the entire user table, not one test account as
+      before. Run `php artisan maisha:generate-daily-meal-plans` (no
+      flags) against a copy of real data and sanity-check the summary
+      line before adding the crontab entry documented in
+      `routes/console.php`.
+- [ ] Full `testing/maisha_test.sh` regression re-run to fold this
+      change into the (already-stale for unrelated reasons — see below)
+      205/206 baseline and get a real current number.
+
+**Files touched:**
+- `app/Http/Controllers/GoalController.php`
+- `app/Models/UserGoal.php`
+- `app/Console/Commands/GenerateDailyMealPlans.php`
+- `routes/console.php`
+- `tests/Feature/GoalControllerTest.php` — new
+- `frontend/src/lib/goalOptions.ts` — new
+- `frontend/src/lib/api.ts`
+- `frontend/src/pages/Settings.tsx`
+- `frontend/src/pages/Onboarding.tsx` — import source + `_animDir`
+  cleanup only; JSX/render tree untouched
+- `frontend/package.json`, `frontend/vite.config.ts` — test tooling
+- `frontend/src/test/setupTests.ts` — new
+- `frontend/src/pages/__tests__/Onboarding.validateStep.test.ts` — new
+- `frontend/src/pages/__tests__/Settings.goals.test.tsx` — new
 
 ### ✅ Pre-commit secrets-scanning hook (Resolved — 2026-07-04)
 Implemented the pre-commit follow-up from the `commands.php` incident
@@ -158,8 +302,9 @@ rather than relying on GitHub push protection as the only backstop.
       sync a flattened array into `User.primary_goals` on every write.
       Backfilled Grace's `primary_goals`. Verified live: a fresh write
       via the test suite correctly synced both tables end-to-end.
-      Revisit whether `UserGoal` is still wanted once Item #7's
-      frontend audit reaches the health-profile-edit screen.
+      **Update 2026-07-04: Item #7 closed — see that entry above.**
+      `UserGoal` kept and given a real frontend caller
+      (Settings > Goals) rather than dropped.
 - [x] Hydration: `WaterLog` and `HydrationLog` confirmed dead (0 rows
       each, no write path in code — `HydrationLog` had zero references
       anywhere outside its own model file). `WaterDailySummary` (33
@@ -520,8 +665,12 @@ testing.
       `MAX_UTAKULAA_PER_USER_PER_DAY`, logs failures via
       `Log::error()`, no retries against rate-limited backend
 - [x] Scheduler entry added to `routes/console.php`, daily 06:00
-      Africa/Nairobi — **registered but NOT YET ACTIVE**, awaiting
-      Item #7 (frontend audit) — the last remaining blocker
+      Africa/Nairobi — was registered but not active pending Item #7.
+      **Update 2026-07-04: Item #7 closed, and the underlying
+      `--test-user=1`-only limitation is fixed — see that entry above.
+      Scheduler is code-ready for all-users mode but still needs a
+      manual dry run + the actual crontab entry before it's truly
+      live — see Item #7's "NOT yet verified" list.**
 - [x] `SCHEDULER_SETUP.md` created documenting manual test +
       activation criteria
 - [x] Manual test passed: `php artisan maisha:generate-daily-meal-plans
@@ -537,6 +686,12 @@ testing.
 - [x] Added clarifying comment block to `router.py` explaining
       hardcoded Claude→OpenAI→fallback chain by design
 - [x] Deleted unused provider stubs (`gemini.py`, `grok.py`)
+
+**Note (2026-07-04):** the frontend's Settings > About tab still
+displays "Powered by xAI Grok" — inconsistent with this cleanup and
+with the Claude-only design decision documented under "What's confirmed
+solid" below. Not fixed as part of Item #7 (out of scope, just a
+string), logged in Smaller known issues.
 
 ### ✅ WhatsApp async queue (was: sync processing blocking webhook)
 - `QUEUE_CONNECTION` changed `sync` → `database` in `.env`
@@ -566,11 +721,34 @@ testing.
 
 ## Smaller known issues (non-blocking)
 
+- **New (2026-07-04, surfaced by Item #7's `npm run lint`/`typecheck`
+  runs — pre-existing, not introduced by that item):**
+  - `src/pages/Workout.tsx:97` — a genuine syntax bug, not a lint nit:
+    `<button>...</button>[n - 1]` attempts to array-index directly
+    after a JSX element, which is invalid TSX. This blocks
+    `npm run typecheck` from ever exiting clean regardless of anything
+    else. Quick, isolated fix — worth doing on its own.
+  - `src/pages/Diet.tsx` and `src/pages/Medical.tsx` — React hooks
+    (`useState`, `useEffect`, `useRef`) called conditionally in several
+    places (`react-hooks/rules-of-hooks`). This is a real correctness
+    risk, not a style preference — React does not guarantee behavior
+    when hook call order varies between renders. Deserves a dedicated,
+    carefully-tested task given the size of both files; not something
+    to drive-by fix.
+  - Assorted pre-existing `@typescript-eslint/no-explicit-any` and
+    unused-import warnings across `Dashboard.tsx`, `Finance.tsx`,
+    `Habits.tsx`, `settings/WhatsApp.tsx` — low priority cleanup.
+  - Settings > About tab still says "Powered by xAI Grok," inconsistent
+    with the Claude-only design decision (see Flask Provider Config
+    Cleanup above). One-line fix, not yet done — flagged, not applied,
+    pending confirmation from whoever owns that copy.
 - `testing/maisha_test.sh`'s secret-loading fix (2026-07-04, see
   Resolved above) has not yet had a full suite re-run against live
   Laravel/Flask services to confirm the 205/206 baseline still holds.
   Start both services + confirm pm2 queue worker is online, then
-  re-run and record the real pass count here.
+  re-run and record the real pass count here. **Item #7's changes
+  should be folded into this same re-run rather than tested
+  separately.**
 - `commands.php`'s useful deployment/setup notes have not yet been
   moved to a sanitized local reference file — currently just sitting
   gitignored on disk with pre-rotation key values still in it. Low
@@ -641,13 +819,21 @@ testing.
 - Schema source-of-truth for Budget, Goals, Medications, Hydration, and
   the dead `UserHealthProfile` table — all decided and confirmed via
   row counts + code grep, not assumption (see Resolved — Schema
-  Consolidation Phase 2)
+  Consolidation Phase 2 and Item #7)
 - Initial GitHub repo push — clean, no secrets present on remote,
   confirmed by direct inspection of `origin/main` (see Resolved — Git
   repo initialization + exposed secrets in initial commit)
 - Pre-commit secrets scanning — active on this repo via
   `.githooks/pre-commit`, verified to block/bypass/pass correctly
   (see Resolved — Pre-commit secrets-scanning hook)
+- `GoalController` — real enum validation, weight-tracking-goal guard,
+  primary_goals sync, all verified against a real DB via
+  `RefreshDatabase` (see Resolved — Item #7). **Not yet verified: live
+  browser → real network call → real DB round trip — see that item's
+  outstanding checklist.**
+- Frontend test tooling (`vitest` + `@testing-library/react`) — wired
+  up and proven working (18/18 real run), a genuine first for this
+  repo (see Resolved — Item #7)
 
 ---
 
@@ -657,9 +843,9 @@ testing.
 Consolidation Phase 2 — full suite re-run after every sub-step).
 
 **Note (2026-07-04):** this baseline has not yet been re-confirmed after
-the `maisha_test.sh` secret-loading hardening — see Smaller known
-issues. Don't assume 205/206 still holds until re-run with real
-Laravel/Flask services up.
+either the `maisha_test.sh` secret-loading hardening or Item #7's
+changes — see Smaller known issues. Don't assume 205/206 still holds
+until re-run with real Laravel/Flask services up.
 
 - 1 failed: Brenda "Complete without goals → 422" — got 401 instead
   (pre-existing, unrelated; logged above)
@@ -674,6 +860,11 @@ check in future (even just hitting the webhook route with a synthetic
 Twilio payload and asserting a 200 + job dispatch) so this doesn't
 silently regress again the way it apparently already had.
 
+**New (2026-07-04):** `backend/maisha-api/tests/Feature/GoalControllerTest.php`
+(7 tests, 16 assertions) and `frontend/.../src/pages/__tests__/*`
+(2 files, 18 tests) are now part of the automated suite going forward
+— run alongside `testing/maisha_test.sh`, not a replacement for it.
+
 Previously fixed:
 - Non-idempotent registration → timestamp-suffixed emails
 - Fragile token acquisition → retry loop with explicit validation in
@@ -687,6 +878,34 @@ Previously fixed:
 
 ## Changelog
 
+- **2026-07-04** — **Item #7 closed.** Frontend architecture audit
+  completed and its actual exit criterion resolved: `UserGoal`/
+  `target_weight_kg`/`timeline_weeks` decided to be kept (real,
+  unfinished feature) rather than dropped as dead code. Built the
+  missing Settings > Goals screen, added real backend enum validation
+  that was missing before (any string was previously accepted as a
+  goal), and found + fixed a second, unrelated bug along the way: the
+  daily meal-plan scheduler was hardcoded to `--test-user=1` and would
+  never have run for real users regardless of activation status — now
+  runs for all onboarded users. Added the repo's first-ever automated
+  tests on both sides: 7 backend tests (16 assertions, real DB run) and
+  18 frontend tests (real run, not simulated) — three genuine bugs were
+  caught and fixed specifically because these tests were written and
+  actually executed rather than assumed correct (a missing router
+  context in one test, a text-match ambiguity in another, and a real
+  UI bug where the secondary-goals section rendered the not-yet-chosen
+  primary goal before any selection was made). `npm run lint` and
+  `npm run typecheck` were run for the first time as part of closing
+  this out and surfaced a meaningful amount of pre-existing, unrelated
+  debt across files this item never touched — logged in Smaller known
+  issues rather than fixed inline, since fixing some of it (the
+  conditional-hooks bugs in `Diet.tsx`/`Medical.tsx` especially)
+  deserves its own dedicated, carefully-tested task rather than a
+  drive-by change bundled into this one. **Not yet done: an actual
+  end-to-end run through the live app (real login, real browser, real
+  network call, real dev DB) and a dry run of the scheduler's new
+  all-users mode before any crontab entry is added** — both logged
+  explicitly so nobody assumes more than what's been proven.
 - **2026-07-04** — Hardened `MAISHA_INTERNAL_SECRET` loading in
   `testing/maisha_test.sh`: replaced silent placeholder fallback with
   priority-ordered resolution (export → `.env` → loud failure).
