@@ -161,27 +161,35 @@ class ProcessIncomingWhatsAppMessage implements ShouldQueue
     }
 
     /**
-     * Look up User by wa_number, defensively handling + prefix.
-     * Returns User if found, null otherwise.
+     * Look up User by wa_number, defensively handling + prefix, falling back
+     * to `phone` (the field actually populated and used by
+     * WhatsAppWebhookController::resolveUserByPhone()).
+     *
+     * Backfills wa_number once a user is confidently matched — this is the
+     * step that was previously missing entirely: the method could find a
+     * user via the phone fallback and hand them back, but never wrote
+     * wa_number onto that user, so every user showed as permanently
+     * "unlinked" for rate-limiting purposes even after a successful match.
+     * Write is intentionally minimal and safe: only fires when a user was
+     * already confidently matched, and only if wa_number isn't already set —
+     * so it can't clobber an existing value or create a false link.
      */
     private function linkUserByWaNumber(string $phone): ?User
     {
         // Normalize: remove + if present
         $normalized = ltrim($phone, '+');
 
-        // Try exact match first
-        $user = User::where('wa_number', $normalized)->first();
-        if ($user) {
-            return $user;
+        $user = User::where('wa_number', $normalized)
+            ->orWhere('wa_number', '+' . $normalized)
+            ->orWhere('phone', $normalized)
+            ->orWhere('phone', '+' . $normalized)
+            ->first();
+
+        if ($user && !$user->wa_number) {
+            $user->update(['wa_number' => $normalized]);
         }
 
-        // Try with + prefix
-        $user = User::where('wa_number', '+' . $normalized)->first();
-        if ($user) {
-            return $user;
-        }
-
-        return null;
+        return $user;
     }
 
     /**
@@ -244,7 +252,7 @@ class ProcessIncomingWhatsAppMessage implements ShouldQueue
                 'error' => $e->getMessage(),
                 'user_id' => $user->id,
             ]);
-            return "I'm having trouble generating a meal suggestion right now. Please try again in a moment!";
+            return "I'm having trouble generating a meal suggestion right now. Please try againin a moment!";
         }
     }
 

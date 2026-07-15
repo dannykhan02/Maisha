@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Models\WhatsappConversationState;
+use App\Models\WhatsappSession;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -11,28 +13,18 @@ use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         //
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
         $this->configureRateLimiting();
     }
 
-    /**
-     * Configure rate limiters for the application.
-     */
     protected function configureRateLimiting(): void
     {
-        // Register / Google OAuth — 10 req/min per IP
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(10)
                 ->by($request->ip())
@@ -43,9 +35,6 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // Login attempts — 5 req/min per email+IP combination
-        // Prevents credential-stuffing against a single account while allowing
-        // different users from the same IP to retry independently
         RateLimiter::for('login-attempts', function (Request $request) {
             $email = $request->input('email', '');
             $key = $email . '|' . $request->ip();
@@ -58,7 +47,6 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // Password reset – strictest, sends real emails
         RateLimiter::for('password', function (Request $request) {
             return Limit::perMinute(3)
                 ->by($request->ip())
@@ -69,7 +57,6 @@ class AppServiceProvider extends ServiceProvider
                 });
         });
 
-        // Public read‑only endpoints
         RateLimiter::for('public', function (Request $request) {
             return Limit::perMinute(60)
                 ->by($request->ip())
@@ -82,10 +69,6 @@ class AppServiceProvider extends ServiceProvider
 
         // ─────────────────────────────────────────
         // WhatsApp webhook — global (all senders combined)
-        // Catches distributed/botnet-style floods. Silent 200 on
-        // breach, not 429 — Twilio's retry behavior on error responses
-        // could otherwise turn a throttle into a retry storm. Breach
-        // is logged so it's not invisible.
         // ─────────────────────────────────────────
         RateLimiter::for('whatsapp-global', function (Request $request) {
             return Limit::perMinute(60)->response(function (Request $request) {
@@ -98,18 +81,38 @@ class AppServiceProvider extends ServiceProvider
 
         // ─────────────────────────────────────────
         // WhatsApp webhook — per-sender (keyed on WaId)
-        // Trustworthy now that signature validation runs before this
-        // in the route middleware stack. Unlinked/unrecognized numbers
-        // get a stricter cap since they can't reach the paid AI path
-        // anyway. Silent 200 on breach, same reasoning as above.
+        //
+        // "Linked" is determined via WhatsappSession, not User::wa_number.
+        // Per Pass 0 investigation (2026-07-15): users.wa_number is never
+        // written anywhere in the codebase, and WhatsappSession.user_id was
+        // also 0 across every row prior to this fix — the entire linking
+        // mechanism (ProcessIncomingWhatsAppMessage) had never actually
+        // fired, because its dispatch call was left commented out in
+        // WhatsAppWebhookController. That dispatch has now been wired up
+        // (see controller), so sessions should begin linking going forward.
+        // This limiter now reads from the table that mechanism actually
+        // writes to.
+        //
+        // Guided-flow exception unchanged: a sender mid-way through a
+        // guided, non-AI data capture flow (BP/sugar) isn't touching the
+        // paid AI path, so it gets a relaxed 4/min instead of the full
+        // 2/min AI-cost-containment cap.
         // ─────────────────────────────────────────
         RateLimiter::for('whatsapp-per-sender', function (Request $request) {
             $waId = $request->input('WaId', $request->ip());
-            $isLinked = User::where('wa_number', $waId)->exists();
 
-            $perMinute = $isLinked ? 5 : 2;
+            $isLinked = WhatsappSession::where('wa_number', $waId)
+                ->whereNotNull('user_id')
+                ->exists();
+
+            $hasActiveGuidedFlow = WhatsappConversationState::whereHas('user', function ($q) use ($waId) {
+                    $q->where('wa_number', $waId)->orWhere('phone', $waId);
+                })
+                ->whereIn('flow', ['bp_capture', 'sugar_capture'])
+                ->exists();
+
+            $perMinute = $isLinked ? 5 : ($hasActiveGuidedFlow ? 4 : 2);
             $perHour   = $isLinked ? 30 : 10;
-            
 
             $onBreach = function (Request $request) use ($waId, $isLinked) {
                 Log::warning('WhatsApp webhook throttled: per-sender limit exceeded', [
