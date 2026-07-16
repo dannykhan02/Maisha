@@ -8,11 +8,13 @@ use App\Models\WhatsappMessage;
 use App\Models\WhatsappConversationState;
 use App\Models\User;
 use App\Models\MedicationExtractionReview;
+use App\Models\VitalsReading;
+use App\Models\ProcessedMedia;
 use App\Services\BpCaptureFlow;
 use App\Services\SugarCaptureFlow;
 use App\Services\WhatsAppService;
-use App\Services\MedicationVisionService;
 use App\Jobs\ProcessIncomingWhatsAppMessage;
+use App\Jobs\ProcessIncomingPhoto;
 
 class WhatsAppWebhookController extends Controller
 {
@@ -46,7 +48,6 @@ class WhatsAppWebhookController extends Controller
         $senderPhone = $payload['From'] ?? null; // e.g. "whatsapp:+254746604602"
 
         if (!$senderPhone) {
-            // Not a valid message from a phone number
             return response('OK', 200);
         }
 
@@ -61,13 +62,16 @@ class WhatsAppWebhookController extends Controller
 
         $userId = $user->id;
 
-        // 2b. Media (e.g. medication label photo) takes priority over any
-        //     text-based routing below — a photo short-circuits the rest of
-        //     the handler entirely.
+        // 2b. Media takes priority over any text-based routing below — a photo
+        //     short-circuits the rest of the handler entirely. All slow work
+        //     (download, downscale, classify, route, extract, save, reply)
+        //     now happens in a queued job, not inline — this webhook only
+        //     claims the media_sid and dispatches, so it returns to Twilio
+        //     near-instantly regardless of how long classification takes.
         $numMedia = (int) ($payload['NumMedia'] ?? 0);
 
         if ($numMedia > 0) {
-            $this->handleMedicationPhoto($payload, $user);
+            $this->handleIncomingPhoto($payload, $user, $senderPhone);
             $this->storeRawMessage($payload);
             return response('OK', 200);
         }
@@ -80,12 +84,10 @@ class WhatsAppWebhookController extends Controller
             $state = null;
         }
 
-        // 4. Check for a flow-trigger phrase FIRST — this can override/restart a stale state.
-        //    A trigger word always wins and resets; only a non-trigger message falls through
-        //    to state-continuation below.
+        // 4. Check for a flow-trigger phrase FIRST
         if (preg_match('/\b(bp|blood pressure)\b/i', $text)) {
             if ($state) {
-                $state->delete(); // abandon any stale/incomplete flow
+                $state->delete();
             }
             $result = (new BpCaptureFlow())->start($userId);
             $this->sendWhatsAppReply($senderPhone, $result['reply']);
@@ -119,13 +121,10 @@ class WhatsAppWebhookController extends Controller
         }
 
         // 6. Fallback: no guided flow handled this message — store it and dispatch
-        //    the async job so it can classify intent (utakulaa/budget/history/help)
-        //    and, along the way, link this WhatsApp session to the user.
-        //    Deliberately NOT moved earlier in this method: this job calls Flask's
-        //    /api/intent (paid AI path) unconditionally, so it must only fire when
-        //    no guided flow already handled the message — otherwise a "Bp" trigger
-        //    would also hit the AI path in parallel and send a second, unrelated
-        //    reply alongside the BP flow's reply.
+        //    the async job so it can classify intent and link this WhatsApp
+        //    session to the user. Deliberately NOT moved earlier: this job
+        //    calls Flask's /api/intent (paid AI path) unconditionally, so it
+        //    must only fire when no guided flow already handled the message.
         $message = $this->storeRawMessage($payload);
         ProcessIncomingWhatsAppMessage::dispatch($message);
 
@@ -133,57 +132,50 @@ class WhatsAppWebhookController extends Controller
     }
 
     /**
-     * Handle an incoming WhatsApp media message (e.g. a photo of a medication
-     * label/box). Downloads the media from Twilio, downscales it, runs vision
-     * extraction, and saves the result for manual review.
+     * Claim + dispatch only. All download/classify/route/extract/save/reply
+     * logic now lives in ProcessIncomingPhoto (queued job) — this method's
+     * only job is to guarantee a given media_sid is claimed exactly once,
+     * synchronously, before any slow work starts. This closes the race
+     * window where a Twilio-retried webhook (e.g. after a timeout waiting
+     * on a slow classify call) could re-trigger a full second classification
+     * for the same photo, since the old dedupe check only ran AFTER
+     * classification completed and something was saved — a photo that
+     * produced a "trouble reaching the image service" reply never reached
+     * that save step, so a retry could run the whole pipeline again.
+     *
+     * NOT YET CONFIRMED SAFE TO DEPLOY: this assumes a queue worker is
+     * actually running (QUEUE_CONNECTION=database requires one). If it's
+     * not running, dispatched jobs will sit in the jobs table indefinitely
+     * and photos will silently produce no reply at all — confirm via
+     * `ps aux | grep "queue:work"` before shipping this.
      */
-    private function handleMedicationPhoto(array $payload, User $user): void
+    private function handleIncomingPhoto(array $payload, User $user, string $senderPhone): void
     {
         $mediaUrl = $payload['MediaUrl0'] ?? null;
         $mediaSid = $payload['MediaSid0'] ?? ($payload['SmsMessageSid'] ?? uniqid());
 
         if (!$mediaUrl) {
-            Log::warning('Medication photo message had no MediaUrl0', ['payload' => $payload]);
+            Log::warning('Photo message had no MediaUrl0', ['payload' => $payload]);
             return;
         }
 
-        // Dedupe — don't re-extract the same media twice
-        if (MedicationExtractionReview::where('media_sid', $mediaSid)->exists()) {
-            Log::info('Medication photo already processed, skipping re-extraction', ['media_sid' => $mediaSid]);
+        // Dedupe BEFORE dispatch, not just before save — this is the actual
+        // fix for the duplicate-reply issue, pending confirmation via
+        // grep -c "trouble reaching the image service" storage/logs/laravel.log
+        // that the duplicate was real and not a WhatsApp client-side artifact.
+        if (MedicationExtractionReview::where('media_sid', $mediaSid)->exists()
+            || VitalsReading::where('media_sid', $mediaSid)->exists()
+            || ProcessedMedia::where('media_sid', $mediaSid)->exists()) {
+            Log::info('Media already processed or in-flight, skipping', ['media_sid' => $mediaSid]);
             return;
         }
 
-        $vision = new MedicationVisionService();
+        // Claim this media_sid immediately, synchronously, so a Twilio retry
+        // arriving seconds later (before the job even finishes) still gets
+        // caught by the check above.
+        ProcessedMedia::create(['media_sid' => $mediaSid]);
 
-        $rawBytes = $vision->downloadTwilioMedia($mediaUrl);
-        if (!$rawBytes) {
-            return; // already logged inside the service
-        }
-
-        $jpegBytes = $vision->downscale($rawBytes);
-        if (!$jpegBytes) {
-            return;
-        }
-
-        $extracted = $vision->extract($jpegBytes);
-        if (!$extracted) {
-            return;
-        }
-
-        MedicationExtractionReview::create([
-            'user_id'        => $user->id,
-            'media_sid'      => $mediaSid,
-            'extracted_data' => $extracted,
-            'confidence'     => $extracted['confidence'] ?? null,
-            'status'         => 'pending',
-        ]);
-
-        Log::info('Medication extraction saved for review', [
-            'user_id' => $user->id,
-            'media_sid' => $mediaSid,
-            'readable' => $extracted['readable'] ?? null,
-            'confidence' => $extracted['confidence'] ?? null,
-        ]);
+        ProcessIncomingPhoto::dispatch($mediaUrl, $mediaSid, $user->id, $senderPhone);
     }
 
     /**
@@ -203,7 +195,6 @@ class WhatsAppWebhookController extends Controller
      */
     private function resolveUserByPhone(string $phone): ?User
     {
-        // "whatsapp:+254746604602" → "254746604602"
         $normalized = preg_replace('/[^0-9]/', '', $phone);
         return User::where('phone', $normalized)->first();
     }
