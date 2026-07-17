@@ -34,6 +34,23 @@ class VitalsPlausibilityChecker
     private const SUGAR_MMOL_L_MIN = 2.2;
     private const SUGAR_MMOL_L_MAX = 27.8;
 
+    // Temperature plausibility bounds (physical sanity, not clinical thresholds)
+    private const TEMP_CELSIUS_MIN = 30.0;
+    private const TEMP_CELSIUS_MAX = 43.0;
+    private const TEMP_FAHRENHEIT_MIN = 86.0;
+    private const TEMP_FAHRENHEIT_MAX = 109.4;
+
+    // Weight — absolute bounds only used as a last-resort sanity check when
+    // there's no prior reading to compare against (catches e.g. a BMI or
+    // body-fat % misread as weight, not real outlier detection).
+    private const WEIGHT_KG_MIN = 20.0;
+    private const WEIGHT_KG_MAX = 300.0;
+    private const WEIGHT_LBS_MIN = 44.0;
+    private const WEIGHT_LBS_MAX = 660.0;
+
+    // Weight — max plausible swing between consecutive readings.
+    private const WEIGHT_CHANGE_THRESHOLD_PERCENT = 0.15;
+
     public static function isPlausibleBp(?int $systolic, ?int $diastolic, ?int $pulse = null): bool
     {
         if ($systolic === null || $diastolic === null) {
@@ -72,5 +89,72 @@ class VitalsPlausibilityChecker
         }
 
         return $value >= self::SUGAR_MMOL_L_MIN && $value <= self::SUGAR_MMOL_L_MAX;
+    }
+
+    public static function isPlausibleTemperature(?float $value, ?string $unit): bool
+    {
+        if ($value === null || !in_array($unit, ['celsius', 'fahrenheit'], true)) {
+            return false;
+        }
+
+        if ($unit === 'celsius') {
+            return $value >= self::TEMP_CELSIUS_MIN && $value <= self::TEMP_CELSIUS_MAX;
+        }
+
+        return $value >= self::TEMP_FAHRENHEIT_MIN && $value <= self::TEMP_FAHRENHEIT_MAX;
+    }
+
+    /**
+     * Weight has no sane absolute range across all adult body types, so this
+     * is primarily a %-change-from-previous check. Callers must fetch the
+     * user's last weight reading before calling this.
+     *
+     * $previousValue and $previousUnit should be null on a user's first-ever
+     * weight reading — in that case we fall back to the absolute bounds only,
+     * and the caller should treat a true result as "no baseline yet" rather
+     * than a confirmed-normal reading.
+     */
+    public static function isPlausibleWeight(
+        ?float $value,
+        ?string $unit,
+        ?float $previousValue = null,
+        ?string $previousUnit = null
+    ): bool {
+        if ($value === null || !in_array($unit, ['kg', 'lbs'], true)) {
+            return false;
+        }
+
+        $withinAbsoluteBounds = $unit === 'kg'
+            ? ($value >= self::WEIGHT_KG_MIN && $value <= self::WEIGHT_KG_MAX)
+            : ($value >= self::WEIGHT_LBS_MIN && $value <= self::WEIGHT_LBS_MAX);
+
+        if (!$withinAbsoluteBounds) {
+            return false;
+        }
+
+        if ($previousValue === null || $previousUnit === null) {
+            return true; // no baseline to compare against
+        }
+
+        $previousInCurrentUnit = self::convertWeight($previousValue, $previousUnit, $unit);
+
+        if ($previousInCurrentUnit <= 0) {
+            return true;
+        }
+
+        $percentChange = abs($value - $previousInCurrentUnit) / $previousInCurrentUnit;
+
+        return $percentChange <= self::WEIGHT_CHANGE_THRESHOLD_PERCENT;
+    }
+
+    private static function convertWeight(float $value, string $fromUnit, string $toUnit): float
+    {
+        if ($fromUnit === $toUnit) {
+            return $value;
+        }
+
+        return $fromUnit === 'kg'
+            ? $value * 2.20462 // kg -> lbs
+            : $value / 2.20462; // lbs -> kg
     }
 }

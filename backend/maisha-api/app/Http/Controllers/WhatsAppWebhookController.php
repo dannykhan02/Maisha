@@ -12,6 +12,11 @@ use App\Models\VitalsReading;
 use App\Models\ProcessedMedia;
 use App\Services\BpCaptureFlow;
 use App\Services\SugarCaptureFlow;
+use App\Services\TemperatureCaptureFlow;
+use App\Services\WeightCaptureFlow;
+use App\Services\VitalsMenuFlow;
+use App\Services\AwaitingPhotoUnitFlow;
+use App\Services\PendingVitalsCorrectionFlow; // Updated import
 use App\Services\WhatsAppService;
 use App\Jobs\ProcessIncomingWhatsAppMessage;
 use App\Jobs\ProcessIncomingPhoto;
@@ -63,11 +68,9 @@ class WhatsAppWebhookController extends Controller
         $userId = $user->id;
 
         // 2b. Media takes priority over any text-based routing below — a photo
-        //     short-circuits the rest of the handler entirely. All slow work
-        //     (download, downscale, classify, route, extract, save, reply)
-        //     now happens in a queued job, not inline — this webhook only
-        //     claims the media_sid and dispatches, so it returns to Twilio
-        //     near-instantly regardless of how long classification takes.
+        //     short-circuits the entire handler. All slow work now happens in a
+        //     queued job, not inline — this webhook only claims the media_sid
+        //     and dispatches, so it returns to Twilio near-instantly.
         $numMedia = (int) ($payload['NumMedia'] ?? 0);
 
         if ($numMedia > 0) {
@@ -84,7 +87,9 @@ class WhatsAppWebhookController extends Controller
             $state = null;
         }
 
-        // 4. Check for a flow-trigger phrase FIRST
+        // 4. Check for a flow‑trigger phrase FIRST — this always wins over an
+        //    in‑progress state, so a user stuck mid‑flow can type a different
+        //    vital's name and get a clean restart instead of getting trapped.
         if (preg_match('/\b(bp|blood pressure)\b/i', $text)) {
             if ($state) {
                 $state->delete();
@@ -105,12 +110,50 @@ class WhatsAppWebhookController extends Controller
             return response('OK', 200);
         }
 
+        if (preg_match('/\b(temp|temperature)\b/i', $text)) {
+            if ($state) {
+                $state->delete();
+            }
+            $result = (new TemperatureCaptureFlow())->start($userId);
+            $this->sendWhatsAppReply($senderPhone, $result['reply']);
+            $this->storeRawMessage($payload);
+            return response('OK', 200);
+        }
+
+        if (preg_match('/\b(weight|weigh)\b/i', $text)) {
+            if ($state) {
+                $state->delete();
+            }
+            $result = (new WeightCaptureFlow())->start($userId);
+            $this->sendWhatsAppReply($senderPhone, $result['reply']);
+            $this->storeRawMessage($payload);
+            return response('OK', 200);
+        }
+
+        // 4e. Generic entry point — no medical jargon required. Opens the
+        //     numbered menu (see VitalsMenuFlow) rather than assuming which
+        //     vital the user means.
+        if (preg_match('/\b(vitals|check ?in|health check|checkup)\b/i', $text)) {
+            if ($state) {
+                $state->delete();
+            }
+            $result = (new VitalsMenuFlow())->start($userId);
+            $this->sendWhatsAppReply($senderPhone, $result['reply']);
+            $this->storeRawMessage($payload);
+            return response('OK', 200);
+        }
+
         // 5. No trigger phrase matched — if there's an active state, continue it
         if ($state) {
             $result = match ($state->flow) {
-                'bp_capture'    => (new BpCaptureFlow())->handle($state, $text),
-                'sugar_capture' => (new SugarCaptureFlow())->handle($state, $text),
-                default         => null,
+                'bp_capture'                  => (new BpCaptureFlow())->handle($state, $text),
+                'sugar_capture'               => (new SugarCaptureFlow())->handle($state, $text),
+                'temperature_capture'         => (new TemperatureCaptureFlow())->handle($state, $text),
+                'weight_capture'              => (new WeightCaptureFlow())->handle($state, $text),
+                'vitals_menu'                 => (new VitalsMenuFlow())->handle($state, $text),
+                'awaiting_photo_unit'         => (new AwaitingPhotoUnitFlow())->handle($state, $text),
+                'pending_vitals_correction'   => (new PendingVitalsCorrectionFlow())->handle($state, $text), // Updated key and class
+                default                       => null,
             };
 
             if ($result) {
@@ -138,16 +181,7 @@ class WhatsAppWebhookController extends Controller
      * synchronously, before any slow work starts. This closes the race
      * window where a Twilio-retried webhook (e.g. after a timeout waiting
      * on a slow classify call) could re-trigger a full second classification
-     * for the same photo, since the old dedupe check only ran AFTER
-     * classification completed and something was saved — a photo that
-     * produced a "trouble reaching the image service" reply never reached
-     * that save step, so a retry could run the whole pipeline again.
-     *
-     * NOT YET CONFIRMED SAFE TO DEPLOY: this assumes a queue worker is
-     * actually running (QUEUE_CONNECTION=database requires one). If it's
-     * not running, dispatched jobs will sit in the jobs table indefinitely
-     * and photos will silently produce no reply at all — confirm via
-     * `ps aux | grep "queue:work"` before shipping this.
+     * for the same photo.
      */
     private function handleIncomingPhoto(array $payload, User $user, string $senderPhone): void
     {
@@ -160,9 +194,7 @@ class WhatsAppWebhookController extends Controller
         }
 
         // Dedupe BEFORE dispatch, not just before save — this is the actual
-        // fix for the duplicate-reply issue, pending confirmation via
-        // grep -c "trouble reaching the image service" storage/logs/laravel.log
-        // that the duplicate was real and not a WhatsApp client-side artifact.
+        // fix for the duplicate-reply issue.
         if (MedicationExtractionReview::where('media_sid', $mediaSid)->exists()
             || VitalsReading::where('media_sid', $mediaSid)->exists()
             || ProcessedMedia::where('media_sid', $mediaSid)->exists()) {

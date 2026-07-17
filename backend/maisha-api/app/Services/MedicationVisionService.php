@@ -59,8 +59,18 @@ PROMPT;
     /**
      * Downscale so the longer edge is capped, to control Claude vision cost.
      * Returns raw JPEG bytes.
+     *
+     * maxEdge bumped 1400 -> 1800 and quality 82 -> 90 after a confirmed
+     * misread (glucometer displaying "107" extracted as "100.7") raised
+     * the question of whether downscaling was degrading fine seven-segment
+     * display text past legibility. This is shared by both the medication
+     * pipeline and the vitals-device pipeline (ProcessIncomingPhoto calls
+     * this once and passes the result to both extract() methods), so the
+     * bump benefits both. Trades a modest increase in per-image API cost
+     * for legibility, which is the right tradeoff for anything feeding
+     * directly into a medical record.
      */
-    public function downscale(string $imageBytes, int $maxEdge = 1400): ?string
+    public function downscale(string $imageBytes, int $maxEdge = 1800): ?string
     {
         $image = @imagecreatefromstring($imageBytes);
         if (!$image) {
@@ -83,7 +93,7 @@ PROMPT;
         }
 
         ob_start();
-        imagejpeg($image, null, 82); // quality 82 — good tradeoff for text legibility vs size
+        imagejpeg($image, null, 90); // quality 90 — prioritizes text/digit legibility for medical data
         $jpegBytes = ob_get_clean();
         imagedestroy($image);
 
