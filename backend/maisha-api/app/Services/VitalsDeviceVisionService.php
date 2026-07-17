@@ -8,13 +8,13 @@ use Illuminate\Support\Facades\Log;
 class VitalsDeviceVisionService
 {
     private const SYSTEM_PROMPT = <<<'PROMPT'
-You read the display(s) of home medical device(s) — blood pressure monitor, blood glucose meter, digital thermometer, and/or bathroom scale — from a photo, OR a printed clinic vitals slip. A single photo may contain MORE THAN ONE device — scan the entire image and report EVERY distinct device display you can see, not just the most prominent one. Return ONLY a JSON object, no other text, no markdown fences.
+You read the display(s) of home medical device(s) — blood pressure monitor, blood glucose meter, digital thermometer, bathroom scale, and/or pulse oximeter — from a photo, OR a printed clinic vitals slip. A single photo may contain MORE THAN ONE device — scan the entire image and reportEVERY distinct device display you can see, not just the most prominent one. Return ONLY a JSON object, no other text, no markdown fences.
 
 Schema:
 {
   "readings": [
     {
-      "device_type": "bp_monitor" | "glucometer" | "thermometer" | "scale" | "printed_slip" | "unclear",
+      "device_type": "bp_monitor" | "glucometer" | "thermometer" | "scale" | "oximeter" | "printed_slip" | "unclear",
       "systolic": integer | null,
       "diastolic": integer | null,
       "pulse": integer | null,
@@ -24,6 +24,7 @@ Schema:
       "temperature_unit": "celsius" | "fahrenheit" | null,
       "weight_value": number | null,
       "weight_unit": "kg" | "lbs" | null,
+      "spo2_value": integer | null,
       "readable": boolean,
       "reason_if_unreadable": string | null,
       "confidence": number (0.0 to 1.0)
@@ -35,17 +36,17 @@ If nothing readable is in the photo at all, return "readings": [] (an empty arra
 
 General rules:
 - Scan the WHOLE image first. If you can see multiple separate device screens (e.g. a glucometer AND a BP monitor, or a scale AND a thermometer), include a SEPARATE object per device in "readings". Do not merge them or report only one.
-- Devices often also show a date, time, battery indicator, or memory/record count alongside the actual reading (e.g. "9-14 12:28 PM" is a date and time, not the reading). Do NOT combine, average, or extract digits from a date, time, battery level, or memory count as if they were the reading — treat those as separate, irrelevant display elements to ignore.
+- Devices often also show a date, time, battery indicator, or memory/record count alongside the actual reading (e.g. "9-14 12:28 PM" isa date and time, not the reading). Do NOT combine, average, or extract digits from a date, time, battery level, or memory count as if they were the reading — treat those as separate, irrelevant display elements to ignore.
 - If any digit is ambiguous, blurry, or you are not fully confident in the exact value, lower "confidence" accordingly rather than reporting a clean-looking number you are not sure of.
-- If there is glare, blur, dim/dark lighting (e.g. a poorly-lit room, garage, or shadow across the display), or the display is off, set readable=false with an appropriate reason_if_unreadable for that reading. Do not attempt to guess digits through a low-visibility photo just because a plausible number seems to be there.
+- If there is glare, blur, dim/dark lighting (e.g. a poorly-lit room, garage, or shadow across the display), or the display is off, setreadable=false with an appropriate reason_if_unreadable for that reading. Do not attempt to guess digits through a low-visibility photojust because a plausible number seems to be there.
 - Never fabricate a plausible-looking number. If in doubt, return null for that field rather than guessing.
-- CRITICAL: whenever readable is false for a reading, reason_if_unreadable MUST be a non-null, non-empty string explaining specifically why (e.g. "glare on screen", "digits partially obscured", "still measuring", "display off", "dim lighting, cannot confirm digits"). Never leave reason_if_unreadable as null when readable is false — that combination is invalid output.
+- CRITICAL: whenever readable is false for a reading, reason_if_unreadable MUST be a non-null, non-empty string explaining specificallywhy (e.g. "glare on screen", "digits partially obscured", "still measuring", "display off", "dim lighting, cannot confirm digits"). Never leave reason_if_unreadable as null when readable is false — that combination is invalid output.
 
 BP monitor rules:
 - Typically shows THREE numbers: systolic (largest, top), diastolic (middle), and pulse/heart rate (often bottom, sometimes with a heart icon). Do not confuse pulse with diastolic — pulse is a heart rate, not a blood pressure number.
 
 Glucometer rules:
-- Shows ONE number, usually with mg/dL or mmol/L printed on screen. If the unit is not visible on the display, set sugar_unit to null — do not guess based on typical value ranges.
+- Shows ONE number, usually with mg/dL or mmol/L printed on screen. If the unit is not visible on the display, set sugar_unit to null —do not guess based on typical value ranges.
 - READ DIGITS CAREFULLY, ONE AT A TIME. Home glucometers almost always display whole numbers in mg/dL (e.g. 107, not 100.7) and one-decimal numbers in mmol/L (e.g. 5.9). Before finalizing a number, re-check: does the decimal point position match what mg/dL vs mmol/L would normally look like? Do not insert or drop a decimal point that isn't clearly, visibly present on the display itself.
 - If you are not fully confident which number on the display is the actual reading versus a date, time, battery indicator, or other non-reading element, set readable=false and explain the ambiguity rather than guessing.
 - If the device appears to still be mid-measurement (e.g. a counting/loading indicator, no stable final reading), set readable=false and reason_if_unreadable="still measuring".
@@ -61,9 +62,14 @@ Scale rules:
 - If you cannot confidently tell which of several similarly-sized numbers is the weight (as opposed to BMI or another metric), set readable=false, reason_if_unreadable="multiple numbers on the scale display, cannot confirm which is weight" rather than guessing.
 - The unit (kg or lbs) must be visibly printed on the display. If not visible, set weight_unit to null — do not guess based on typical value ranges.
 
-Unsupported devices:
-- Pulse oximeters (small fingertip clip devices measuring SpO2% and pulse rate, typically with a red or blue glowing display showing two numbers side by side) are NOT currently supported. If you see one anywhere in the photo, ignore it completely — do not include it as an entry in the "readings" array at all, not even as an "unclear" or unreadable entry. Only report on bp_monitor, glucometer, thermometer, scale, or printed_slip devices.
-- Likewise, ignore purely instructional or packaging graphics that aren't a live device reading — for example a printed diagram showing how to size a cuff, or a product listing's watermark/logo text. These are not readings and should not appear in the output at all.
+Pulse oximeter rules:
+- A pulse oximeter is a small fingertip clip device measuring SpO2% and pulse rate, typically with a red or blue glowing display showing two numbers side by side: SpO2 (blood oxygen saturation, usually the larger/upper number, a percentage typically 90-100) and pulse rate (usually the lower number, a heart rate typically 40-180, sometimes next to a small heart or pulse-wave icon). Do NOT confuse these two numbers with each other.
+- Set device_type="oximeter", put the oxygen saturation percentage in "spo2_value", and put the heart rate in "pulse". Leave systolic/diastolic/sugar_value/temperature_value/weight_value null for this entry.
+- SpO2 is always a whole-number percentage (e.g. 97, not 97.4). If the two numbers on the display are close in value or you cannot confidently tell which is SpO2 versus pulse, set readable=false, reason_if_unreadable="cannot confirm which number is SpO2 versus pulse rate" rather than guessing.
+- If the device is still mid-measurement (flashing/searching indicator, no stable reading), set readable=false and reason_if_unreadable="still measuring".
+
+Devices not currently supported:
+- Ignore purely instructional or packaging graphics that aren't a live device reading — for example a printed diagram showing how to size a cuff, or a product listing's watermark/logo text. These are not readings and should not appear in the output at all.
 PROMPT;
 
     public function extract(string $jpegBytes): ?array

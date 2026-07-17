@@ -23,6 +23,13 @@ use Illuminate\Support\Facades\Log;
  * A reading is routed here (flagged for possible correction) when:
  *  - It's a BP reading, always (real test run produced two different
  *    results from retrying the SAME photo, both at high confidence).
+ *  - It's a pulse oximeter (SpO2) reading, always (newly wired-up device
+ *    type, no track record yet — see the branch below).
+ *  - It's a weight reading flagged as a percentage-change outlier by the
+ *    caller (i.e. VitalsPlausibilityChecker::isPlausibleWeight() failed
+ *    against the user's last saved weight) — this is passed in via
+ *    $isOutlier rather than recomputed here, since the caller already
+ *    has the last-reading context needed to compute it.
  *  - Any reading from a photo where a retry fired at all.
  *  - Any reading below a flat confidence floor (0.9).
  *
@@ -129,7 +136,14 @@ class PendingVitalsCorrectionFlow
         return 'unknown';
     }
 
-    public static function requiresCorrection(array $reading, bool $retryFiredOnThisPhoto): bool
+    /**
+     * $isOutlier is only meaningful for weight readings — it's the
+     * result of VitalsPlausibilityChecker::isPlausibleWeight() (negated)
+     * computed by the caller against the user's last saved weight. It
+     * defaults to false so every other call site (BP, oximeter, sugar,
+     * temperature) is unaffected and doesn't need to pass it.
+     */
+    public static function requiresCorrection(array $reading, bool $retryFiredOnThisPhoto, bool $isOutlier = false): bool
     {
         $isBp = ($reading['systolic'] ?? null) !== null && ($reading['diastolic'] ?? null) !== null;
 
@@ -145,6 +159,21 @@ class PendingVitalsCorrectionFlow
         $isOximeter = ($reading['spo2_value'] ?? null) !== null;
 
         if ($isOximeter) {
+            return true;
+        }
+
+        // Weight doesn't get the blanket "always" treatment BP/oximeter
+        // get (unlike those, it has an established, reliable extraction
+        // path), but a percentage-change outlier is a strong-enough
+        // signal on its own that it shouldn't be left as a passive note
+        // the user can't act on. $isOutlier is the same check that
+        // drives the "(bigger jump than usual, worth a re-check)" note
+        // that used to be appended in ProcessIncomingPhoto — if it
+        // fires, route to the same confirm/deny prompt BP and oximeter
+        // always get, instead of just a note.
+        $isWeight = ($reading['weight_value'] ?? null) !== null;
+
+        if ($isWeight) {
             return true;
         }
 

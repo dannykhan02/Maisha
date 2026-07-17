@@ -130,13 +130,14 @@ class ProcessIncomingPhoto implements ShouldQueue
      * Uses AwaitingPhotoUnitFlow for sugar, temperature, and weight when
      * the unit is missing. Every readable reading is saved immediately —
      * there's no gate on the save anymore. Readings that meet
-     * PendingVitalsCorrectionFlow's criteria (BP always, anything from a
-     * photo where a retry fired, or anything below the confidence floor)
-     * are ALSO collected into $needsCorrection as they're saved; once the
-     * loop finishes, that whole batch is enqueued as a single combined
-     * "here's what to double check" message rather than one message per
-     * reading. Readings that don't meet those criteria just get a normal
-     * "X saved" line, same as always.
+     * PendingVitalsCorrectionFlow's criteria (BP always, oximeter always,
+     * a weight outlier by percentage change, anything from a photo where
+     * a retry fired, or anything below the confidence floor) are ALSO
+     * collected into $needsCorrection as they're saved; once the loop
+     * finishes, that whole batch is enqueued as a single combined "here's
+     * what to double check" message rather than one message per reading.
+     * Readings that don't meet those criteria just get a normal "X saved"
+     * line, same as always.
      *
      * Reply copy is kept short and non-repetitive on purpose — a user
      * reading this on their phone should get the gist in one glance,
@@ -246,7 +247,9 @@ class ProcessIncomingPhoto implements ShouldQueue
                         $user->id,
                         'sugar',
                         (float) $reading['sugar_value'],
-                        $this->mediaSid
+                        $this->mediaSid,
+                        $reading['confidence'] ?? null,
+                        $retryFired
                     );
                     continue;
                 }
@@ -300,7 +303,9 @@ class ProcessIncomingPhoto implements ShouldQueue
                         $user->id,
                         'temperature',
                         (float) $reading['temperature_value'],
-                        $this->mediaSid
+                        $this->mediaSid,
+                        $reading['confidence'] ?? null,
+                        $retryFired
                     );
                     continue;
                 }
@@ -356,7 +361,9 @@ class ProcessIncomingPhoto implements ShouldQueue
                         $user->id,
                         'weight',
                         (float) $reading['weight_value'],
-                        $this->mediaSid
+                        $this->mediaSid,
+                        $reading['confidence'] ?? null,
+                        $retryFired
                     );
                     continue;
                 }
@@ -386,16 +393,14 @@ class ProcessIncomingPhoto implements ShouldQueue
                         'recorded_at'  => now(),
                     ]);
 
-                    if (PendingVitalsCorrectionFlow::requiresCorrection($reading, $retryFired)) {
+                    // A weight outlier (percentage-change flagged) now
+                    // routes through the same confirm/deny prompt BP and
+                    // oximeter always get, rather than a passive note —
+                    // see PendingVitalsCorrectionFlow::requiresCorrection().
+                    if (PendingVitalsCorrectionFlow::requiresCorrection($reading, $retryFired, !$isPlausible)) {
                         $needsCorrection[] = ['reading' => $reading, 'vitals_reading_id' => $saved->id];
                     } else {
-                        $note = '';
-                        if (!$isPlausible) {
-                            $note = $lastWeight
-                                ? " (bigger jump than usual, worth a re-check)"
-                                : " (looks unusually high or low, worth a re-check)";
-                        }
-                        $replies[] = "Weight saved: {$reading['weight_value']} {$reading['weight_unit']}{$note}";
+                        $replies[] = "Weight saved: {$reading['weight_value']} {$reading['weight_unit']}";
                     }
 
                     $savedAny = true;
